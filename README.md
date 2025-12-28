@@ -141,6 +141,8 @@ url2 := client.URL()
 
 This library is a mostly drop-in replacement for the [official Interactsh](https://github.com/projectdiscovery/interactsh) client with a simplified API.
 
+**Binary size:** If ProjectDiscovery is not already in your dependency tree, switching to `interactsh-lite` can reduce your compiled binary size by up to 20MB.
+
 ### Import Changes
 
 ```diff
