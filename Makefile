@@ -1,7 +1,7 @@
 export GO111MODULE = on
 
 VERSION ?= 0.1.0
-LDFLAGS = -ldflags "-X main.version=$(VERSION) -X main.rev=$$(git rev-list --count HEAD 2>/dev/null || echo 0)"
+LDFLAGS = -ldflags "-s -w -X main.version=$(VERSION) -X main.rev=$$(git rev-list --count HEAD 2>/dev/null || echo 0)"
 CMDS = $(notdir $(wildcard cmd/*))
 PLATFORMS ?= linux-amd64 linux-arm64 darwin-amd64 darwin-arm64 windows-amd64
 
