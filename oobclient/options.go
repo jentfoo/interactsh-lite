@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-const userAgent = "go-harden/interactsh-lite-v0.1"
+const userAgent = "go-appsec/interactsh-lite-v0.1"
 
 // Options configures the client behavior.
 type Options struct {

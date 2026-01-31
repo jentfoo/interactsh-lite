@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/go-harden/interactsh-lite/oobclient"
+	"github.com/go-appsec/interactsh-lite/oobclient"
 )
 
 const timestampFormat = "2006-01-02 15:04:05"

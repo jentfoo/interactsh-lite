@@ -13,7 +13,7 @@ import (
 
 	"github.com/spf13/pflag"
 
-	"github.com/go-harden/interactsh-lite/oobclient"
+	"github.com/go-appsec/interactsh-lite/oobclient"
 )
 
 var (

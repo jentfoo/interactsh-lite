@@ -1,4 +1,4 @@
-module github.com/go-harden/interactsh-lite
+module github.com/go-appsec/interactsh-lite
 
 go 1.24
 

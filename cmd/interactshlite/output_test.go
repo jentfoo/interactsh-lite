@@ -9,7 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/go-harden/interactsh-lite/oobclient"
+	"github.com/go-appsec/interactsh-lite/oobclient"
 )
 
 func TestFormatStandard(t *testing.T) {
