@@ -86,32 +86,38 @@ type Client struct {
 //
 // Returns an error if registration fails with all configured servers.
 // Use errors.Is() to check for specific error conditions like ErrUnauthorized.
-func New(ctx context.Context, opts *Options) (*Client, error) {
-	if opts == nil {
-		opts = &DefaultOptions
+func New(ctx context.Context, opts ...Options) (*Client, error) {
+	var opt Options
+	if len(opts) > 0 {
+		opt = opts[0]
 	}
 
-	serverURLs := opts.ServerURLs
+	serverURLs := opt.ServerURLs
 	if len(serverURLs) == 0 {
 		serverURLs = DefaultOptions.ServerURLs
 	}
 
-	httpClient := opts.HTTPClient
+	httpClient := opt.HTTPClient
 	if httpClient == nil {
-		httpTimeout := opts.HTTPTimeout
+		httpTimeout := opt.HTTPTimeout
 		if httpTimeout == 0 {
 			httpTimeout = DefaultOptions.HTTPTimeout
 		}
 		httpClient = newSecureHTTPClient(httpTimeout)
 	}
 
-	correlationIDLength := opts.CorrelationIdLength
+	correlationIDLength := opt.CorrelationIdLength
 	if correlationIDLength == 0 {
 		correlationIDLength = DefaultOptions.CorrelationIdLength
 	}
-	correlationIDNonceLength := opts.CorrelationIdNonceLength
+	correlationIDNonceLength := opt.CorrelationIdNonceLength
 	if correlationIDNonceLength == 0 {
 		correlationIDNonceLength = DefaultOptions.CorrelationIdNonceLength
+	}
+
+	keepAliveInterval := opt.KeepAliveInterval
+	if keepAliveInterval == 0 && !opt.DisableKeepAlive {
+		keepAliveInterval = DefaultOptions.KeepAliveInterval
 	}
 
 	privateKey, err := rsa.GenerateKey(rand.Reader, rsaKeySize)
@@ -132,12 +138,12 @@ func New(ctx context.Context, opts *Options) (*Client, error) {
 	client := &Client{
 		correlationID:            correlationID,
 		secretKey:                secretKey,
-		token:                    opts.Token,
+		token:                    opt.Token,
 		privateKey:               privateKey,
 		publicKey:                &privateKey.PublicKey,
 		publicKeyB64:             publicKeyB64,
-		keepAliveInterval:        opts.KeepAliveInterval,
-		disableHTTPFallback:      opts.DisableHTTPFallback,
+		keepAliveInterval:        keepAliveInterval,
+		disableHTTPFallback:      opt.DisableHTTPFallback,
 		httpClient:               httpClient,
 		correlationIDNonceLength: correlationIDNonceLength,
 		state:                    stateIdle,
@@ -619,7 +625,7 @@ func (c *Client) SaveSession(path string) error {
 //
 // Returns an error if the session file cannot be read, parsed, or if
 // re-registration fails.
-func LoadSession(ctx context.Context, path string, opts ...*Options) (*Client, error) {
+func LoadSession(ctx context.Context, path string, opts ...Options) (*Client, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read session file: %w", err)
@@ -650,13 +656,16 @@ func LoadSession(ctx context.Context, path string, opts ...*Options) (*Client, e
 	var disableHTTPFallback bool
 	var httpClient *http.Client
 
-	if len(opts) > 0 && opts[0] != nil {
+	if len(opts) > 0 {
 		opt := opts[0]
 		if opt.HTTPTimeout > 0 {
 			httpTimeout = opt.HTTPTimeout
 		}
 		if opt.KeepAliveInterval > 0 {
 			keepAliveInterval = opt.KeepAliveInterval
+		}
+		if opt.DisableKeepAlive {
+			keepAliveInterval = 0
 		}
 		if opt.CorrelationIdNonceLength > 0 {
 			correlationIDNonceLength = opt.CorrelationIdNonceLength

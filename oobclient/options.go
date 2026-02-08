@@ -31,9 +31,12 @@ type Options struct {
 	HTTPTimeout time.Duration
 
 	// KeepAliveInterval is how often to re-register to prevent session eviction.
-	// Set to 0 to disable keep-alive.
 	// Default: 60 seconds
 	KeepAliveInterval time.Duration
+
+	// DisableKeepAlive disables periodic re-registration.
+	// When true, KeepAliveInterval is ignored.
+	DisableKeepAlive bool
 
 	// DisableHTTPFallback prevents falling back to HTTP if HTTPS fails.
 	// Default: false (fallback enabled)

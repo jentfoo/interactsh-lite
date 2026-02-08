@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/go-appsec/interactsh-lite/oobclient"
 )
 
 // Config holds CLI configuration from file and flags.
@@ -29,12 +31,12 @@ type Config struct {
 // LoadConfig loads configuration from a YAML file, applying defaults for unset values.
 func LoadConfig(path string) (Config, error) {
 	cfg := Config{
-		Server:                   "oast.pro,oast.live,oast.site,oast.online,oast.fun,oast.me",
+		Server:                   strings.Join(oobclient.DefaultOptions.ServerURLs, ","),
 		Number:                   1,
 		PollInterval:             5,
-		CorrelationIdLength:      20,
-		CorrelationIdNonceLength: 13,
-		KeepAliveInterval:        time.Minute,
+		CorrelationIdLength:      oobclient.DefaultOptions.CorrelationIdLength,
+		CorrelationIdNonceLength: oobclient.DefaultOptions.CorrelationIdNonceLength,
+		KeepAliveInterval:        oobclient.DefaultOptions.KeepAliveInterval,
 	}
 
 	data, err := os.ReadFile(path)

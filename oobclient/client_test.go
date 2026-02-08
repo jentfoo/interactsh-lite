@@ -194,9 +194,9 @@ func TestClientStateMachine(t *testing.T) {
 	t.Run("start_stop_polling", func(t *testing.T) {
 		server := newMockServer(t)
 
-		client, err := New(t.Context(), &Options{
-			ServerURLs:        []string{server.URL},
-			KeepAliveInterval: 0,
+		client, err := New(t.Context(), Options{
+			ServerURLs:       []string{server.URL},
+			DisableKeepAlive: true,
 		})
 		require.NoError(t, err)
 		t.Cleanup(func() { _ = client.Close() })
@@ -215,9 +215,9 @@ func TestClientStateMachine(t *testing.T) {
 	t.Run("double_start_returns_error", func(t *testing.T) {
 		server := newMockServer(t)
 
-		client, err := New(t.Context(), &Options{
-			ServerURLs:        []string{server.URL},
-			KeepAliveInterval: 0,
+		client, err := New(t.Context(), Options{
+			ServerURLs:       []string{server.URL},
+			DisableKeepAlive: true,
 		})
 		require.NoError(t, err)
 		t.Cleanup(func() { _ = client.Close() })
@@ -232,9 +232,9 @@ func TestClientStateMachine(t *testing.T) {
 	t.Run("stop_without_start_returns_error", func(t *testing.T) {
 		server := newMockServer(t)
 
-		client, err := New(t.Context(), &Options{
-			ServerURLs:        []string{server.URL},
-			KeepAliveInterval: 0,
+		client, err := New(t.Context(), Options{
+			ServerURLs:       []string{server.URL},
+			DisableKeepAlive: true,
 		})
 		require.NoError(t, err)
 		t.Cleanup(func() { _ = client.Close() })
@@ -246,9 +246,9 @@ func TestClientStateMachine(t *testing.T) {
 	t.Run("close_stops_polling", func(t *testing.T) {
 		server := newMockServer(t)
 
-		client, err := New(t.Context(), &Options{
-			ServerURLs:        []string{server.URL},
-			KeepAliveInterval: 0,
+		client, err := New(t.Context(), Options{
+			ServerURLs:       []string{server.URL},
+			DisableKeepAlive: true,
 		})
 		require.NoError(t, err)
 
@@ -264,9 +264,9 @@ func TestClientStateMachine(t *testing.T) {
 	t.Run("operations_on_closed_client", func(t *testing.T) {
 		server := newMockServer(t)
 
-		client, err := New(t.Context(), &Options{
-			ServerURLs:        []string{server.URL},
-			KeepAliveInterval: 0,
+		client, err := New(t.Context(), Options{
+			ServerURLs:       []string{server.URL},
+			DisableKeepAlive: true,
 		})
 		require.NoError(t, err)
 
@@ -283,9 +283,9 @@ func TestClientStateMachine(t *testing.T) {
 	t.Run("close_is_idempotent", func(t *testing.T) {
 		server := newMockServer(t)
 
-		client, err := New(t.Context(), &Options{
-			ServerURLs:        []string{server.URL},
-			KeepAliveInterval: 0,
+		client, err := New(t.Context(), Options{
+			ServerURLs:       []string{server.URL},
+			DisableKeepAlive: true,
 		})
 		require.NoError(t, err)
 
@@ -304,9 +304,9 @@ func TestClientDomain(t *testing.T) {
 	}))
 	t.Cleanup(server.Close)
 
-	client, err := New(t.Context(), &Options{
-		ServerURLs:        []string{server.URL},
-		KeepAliveInterval: 0,
+	client, err := New(t.Context(), Options{
+		ServerURLs:       []string{server.URL},
+		DisableKeepAlive: true,
 	})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = client.Close() })
@@ -327,9 +327,9 @@ func TestClientURL(t *testing.T) {
 	}))
 	t.Cleanup(server.Close)
 
-	client, err := New(t.Context(), &Options{
-		ServerURLs:        []string{server.URL},
-		KeepAliveInterval: 0,
+	client, err := New(t.Context(), Options{
+		ServerURLs:       []string{server.URL},
+		DisableKeepAlive: true,
 	})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = client.Close() })
@@ -392,9 +392,9 @@ func TestSaveLoadSession(t *testing.T) {
 	t.Run("round_trip", func(t *testing.T) {
 		server := newMockServer(t)
 
-		client, err := New(t.Context(), &Options{
-			ServerURLs:        []string{server.URL},
-			KeepAliveInterval: 0,
+		client, err := New(t.Context(), Options{
+			ServerURLs:       []string{server.URL},
+			DisableKeepAlive: true,
 		})
 		require.NoError(t, err)
 		t.Cleanup(func() { _ = client.Close() })
@@ -462,9 +462,9 @@ public-key: "dGVzdA=="`
 		}))
 		t.Cleanup(server.Close)
 
-		client, err := New(t.Context(), &Options{
-			ServerURLs:        []string{server.URL},
-			KeepAliveInterval: 0,
+		client, err := New(t.Context(), Options{
+			ServerURLs:       []string{server.URL},
+			DisableKeepAlive: true,
 		})
 		require.NoError(t, err)
 
@@ -491,9 +491,9 @@ public-key: "dGVzdA=="`
 			_, _ = w.Write([]byte(`{"message":"registration successful"}`))
 		}))
 
-		client, err := New(t.Context(), &Options{
-			ServerURLs:        []string{server.URL},
-			KeepAliveInterval: 0,
+		client, err := New(t.Context(), Options{
+			ServerURLs:       []string{server.URL},
+			DisableKeepAlive: true,
 		})
 		require.NoError(t, err)
 
@@ -520,9 +520,9 @@ func TestNew(t *testing.T) {
 		}))
 		t.Cleanup(server.Close)
 
-		client, err := New(t.Context(), &Options{
-			ServerURLs:        []string{server.URL},
-			KeepAliveInterval: 0,
+		client, err := New(t.Context(), Options{
+			ServerURLs:       []string{server.URL},
+			DisableKeepAlive: true,
 		})
 		require.NoError(t, err)
 		t.Cleanup(func() { _ = client.Close() })
@@ -539,9 +539,9 @@ func TestNew(t *testing.T) {
 		}))
 		t.Cleanup(server.Close)
 
-		client, err := New(t.Context(), &Options{
+		client, err := New(t.Context(), Options{
 			ServerURLs:          []string{server.URL},
-			KeepAliveInterval:   0,
+			DisableKeepAlive:    true,
 			CorrelationIdLength: 10,
 		})
 		require.NoError(t, err)
@@ -561,10 +561,10 @@ func TestNew(t *testing.T) {
 		}))
 		t.Cleanup(server.Close)
 
-		client, err := New(t.Context(), &Options{
-			ServerURLs:        []string{server.URL},
-			Token:             "test-token",
-			KeepAliveInterval: 0,
+		client, err := New(t.Context(), Options{
+			ServerURLs:       []string{server.URL},
+			Token:            "test-token",
+			DisableKeepAlive: true,
 		})
 		require.NoError(t, err)
 		t.Cleanup(func() { _ = client.Close() })
@@ -573,10 +573,10 @@ func TestNew(t *testing.T) {
 	})
 
 	t.Run("fails_all_servers", func(t *testing.T) {
-		_, err := New(t.Context(), &Options{
+		_, err := New(t.Context(), Options{
 			ServerURLs:          []string{"http://invalid.local:9999"},
 			HTTPTimeout:         20 * time.Millisecond,
-			KeepAliveInterval:   0,
+			DisableKeepAlive:    true,
 			DisableHTTPFallback: true,
 		})
 		require.Error(t, err)
@@ -590,9 +590,9 @@ func TestNew(t *testing.T) {
 		}))
 		t.Cleanup(server.Close)
 
-		_, err := New(t.Context(), &Options{
-			ServerURLs:        []string{server.URL},
-			KeepAliveInterval: 0,
+		_, err := New(t.Context(), Options{
+			ServerURLs:       []string{server.URL},
+			DisableKeepAlive: true,
 		})
 		require.ErrorIs(t, err, ErrUnauthorized)
 		assert.Contains(t, err.Error(), "failed to register with any server")
@@ -608,9 +608,9 @@ func TestNew(t *testing.T) {
 		}))
 		t.Cleanup(server.Close)
 
-		client, err := New(t.Context(), &Options{
-			ServerURLs:        []string{server.URL},
-			KeepAliveInterval: 0,
+		client, err := New(t.Context(), Options{
+			ServerURLs:       []string{server.URL},
+			DisableKeepAlive: true,
 		})
 		require.NoError(t, err)
 		t.Cleanup(func() { _ = client.Close() })
@@ -629,10 +629,10 @@ func TestNew(t *testing.T) {
 
 		// Server URL without scheme - should try https then http
 		serverHost := strings.TrimPrefix(server.URL, "http://")
-		client, err := New(t.Context(), &Options{
-			ServerURLs:        []string{serverHost},
-			HTTPTimeout:       500 * time.Millisecond,
-			KeepAliveInterval: 0,
+		client, err := New(t.Context(), Options{
+			ServerURLs:       []string{serverHost},
+			HTTPTimeout:      500 * time.Millisecond,
+			DisableKeepAlive: true,
 		})
 
 		// The test server is HTTP only, so HTTPS will fail and HTTP will succeed
@@ -658,9 +658,9 @@ func TestNew(t *testing.T) {
 			cancel()
 		}()
 
-		_, err := New(ctx, &Options{
+		_, err := New(ctx, Options{
 			ServerURLs:          []string{server.URL},
-			KeepAliveInterval:   0,
+			DisableKeepAlive:    true,
 			DisableHTTPFallback: true,
 		})
 
@@ -683,10 +683,10 @@ func TestNew(t *testing.T) {
 			},
 		}
 
-		client, err := New(t.Context(), &Options{
-			ServerURLs:        []string{"http://test.example.com"},
-			HTTPClient:        &http.Client{Transport: customTransport},
-			KeepAliveInterval: 0,
+		client, err := New(t.Context(), Options{
+			ServerURLs:       []string{"http://test.example.com"},
+			HTTPClient:       &http.Client{Transport: customTransport},
+			DisableKeepAlive: true,
 		})
 		require.NoError(t, err)
 		t.Cleanup(func() { _ = client.Close() })
@@ -720,9 +720,9 @@ func TestPolling(t *testing.T) {
 		}))
 		t.Cleanup(server.Close)
 
-		client, err := New(t.Context(), &Options{
-			ServerURLs:        []string{server.URL},
-			KeepAliveInterval: 0,
+		client, err := New(t.Context(), Options{
+			ServerURLs:       []string{server.URL},
+			DisableKeepAlive: true,
 		})
 		require.NoError(t, err)
 		t.Cleanup(func() { _ = client.Close() })
@@ -769,9 +769,9 @@ func TestPolling(t *testing.T) {
 		}))
 		t.Cleanup(server.Close)
 
-		client, err := New(t.Context(), &Options{
-			ServerURLs:        []string{server.URL},
-			KeepAliveInterval: 0,
+		client, err := New(t.Context(), Options{
+			ServerURLs:       []string{server.URL},
+			DisableKeepAlive: true,
 		})
 		require.NoError(t, err)
 		t.Cleanup(func() { _ = client.Close() })
@@ -806,9 +806,9 @@ func TestDeregistration(t *testing.T) {
 		}))
 		t.Cleanup(server.Close)
 
-		client, err := New(t.Context(), &Options{
-			ServerURLs:        []string{server.URL},
-			KeepAliveInterval: 0,
+		client, err := New(t.Context(), Options{
+			ServerURLs:       []string{server.URL},
+			DisableKeepAlive: true,
 		})
 		require.NoError(t, err)
 
@@ -833,9 +833,9 @@ func TestDeregistration(t *testing.T) {
 		}))
 		t.Cleanup(server.Close)
 
-		client, err := New(t.Context(), &Options{
-			ServerURLs:        []string{server.URL},
-			KeepAliveInterval: 0,
+		client, err := New(t.Context(), Options{
+			ServerURLs:       []string{server.URL},
+			DisableKeepAlive: true,
 		})
 		require.NoError(t, err)
 
@@ -871,7 +871,7 @@ func TestKeepAlive(t *testing.T) {
 		}))
 		t.Cleanup(server.Close)
 
-		client, err := New(t.Context(), &Options{
+		client, err := New(t.Context(), Options{
 			ServerURLs:        []string{server.URL},
 			KeepAliveInterval: 50 * time.Millisecond,
 		})
@@ -905,9 +905,9 @@ func TestKeepAlive(t *testing.T) {
 		}))
 		t.Cleanup(server.Close)
 
-		client, err := New(t.Context(), &Options{
-			ServerURLs:        []string{server.URL},
-			KeepAliveInterval: 0,
+		client, err := New(t.Context(), Options{
+			ServerURLs:       []string{server.URL},
+			DisableKeepAlive: true,
 		})
 		require.NoError(t, err)
 
@@ -939,9 +939,9 @@ func TestConcurrentAccess(t *testing.T) {
 	t.Cleanup(server.Close)
 
 	t.Run("concurrent_url_generation", func(t *testing.T) {
-		client, err := New(t.Context(), &Options{
-			ServerURLs:        []string{server.URL},
-			KeepAliveInterval: 0,
+		client, err := New(t.Context(), Options{
+			ServerURLs:       []string{server.URL},
+			DisableKeepAlive: true,
 		})
 		require.NoError(t, err)
 		t.Cleanup(func() { _ = client.Close() })
@@ -975,9 +975,9 @@ func TestConcurrentAccess(t *testing.T) {
 	})
 
 	t.Run("concurrent_state_checks", func(t *testing.T) {
-		client, err := New(t.Context(), &Options{
-			ServerURLs:        []string{server.URL},
-			KeepAliveInterval: 0,
+		client, err := New(t.Context(), Options{
+			ServerURLs:       []string{server.URL},
+			DisableKeepAlive: true,
 		})
 		require.NoError(t, err)
 		t.Cleanup(func() { _ = client.Close() })
@@ -1006,9 +1006,9 @@ func TestConcurrentAccess(t *testing.T) {
 	})
 
 	t.Run("concurrent_polling_operations", func(t *testing.T) {
-		client, err := New(t.Context(), &Options{
-			ServerURLs:        []string{server.URL},
-			KeepAliveInterval: 0,
+		client, err := New(t.Context(), Options{
+			ServerURLs:       []string{server.URL},
+			DisableKeepAlive: true,
 		})
 		require.NoError(t, err)
 		t.Cleanup(func() { _ = client.Close() })
@@ -1248,9 +1248,9 @@ func TestPollingWithEncryptedData(t *testing.T) {
 		}))
 		t.Cleanup(server.Close)
 
-		client, err := New(t.Context(), &Options{
-			ServerURLs:        []string{server.URL},
-			KeepAliveInterval: 0,
+		client, err := New(t.Context(), Options{
+			ServerURLs:       []string{server.URL},
+			DisableKeepAlive: true,
 		})
 		require.NoError(t, err)
 		t.Cleanup(func() { _ = client.Close() })
@@ -1306,9 +1306,9 @@ func TestPollingWithEncryptedData(t *testing.T) {
 		}))
 		t.Cleanup(server.Close)
 
-		client, err := New(t.Context(), &Options{
-			ServerURLs:        []string{server.URL},
-			KeepAliveInterval: 0,
+		client, err := New(t.Context(), Options{
+			ServerURLs:       []string{server.URL},
+			DisableKeepAlive: true,
 		})
 		require.NoError(t, err)
 		t.Cleanup(func() { _ = client.Close() })
@@ -1366,9 +1366,9 @@ func TestPollingWithEncryptedData(t *testing.T) {
 		}))
 		t.Cleanup(server.Close)
 
-		client, err := New(t.Context(), &Options{
-			ServerURLs:        []string{server.URL},
-			KeepAliveInterval: 0,
+		client, err := New(t.Context(), Options{
+			ServerURLs:       []string{server.URL},
+			DisableKeepAlive: true,
 		})
 		require.NoError(t, err)
 		t.Cleanup(func() { _ = client.Close() })

@@ -183,10 +183,11 @@ func main() {
 	}
 	output := io.MultiWriter(writers...)
 
-	opts := &oobclient.Options{
+	opts := oobclient.Options{
 		ServerURLs:               ParseCommaSeparated(cfg.Server),
 		Token:                    cfg.Token,
 		KeepAliveInterval:        cfg.KeepAliveInterval,
+		DisableKeepAlive:         cfg.KeepAliveInterval <= 0,
 		DisableHTTPFallback:      cfg.NoHTTPFallback,
 		CorrelationIdLength:      cfg.CorrelationIdLength,
 		CorrelationIdNonceLength: cfg.CorrelationIdNonceLength,

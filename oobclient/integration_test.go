@@ -24,7 +24,7 @@ func TestIntegration_NewClient(t *testing.T) {
 	}
 	// No t.Parallel() - run sequentially to be kind to public servers
 
-	client, err := New(t.Context(), nil)
+	client, err := New(t.Context())
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = client.Close() })
 
@@ -42,7 +42,7 @@ func TestIntegration_URLGeneration(t *testing.T) {
 		t.Skip("skipping integration test in short mode")
 	}
 
-	client, err := New(t.Context(), nil)
+	client, err := New(t.Context())
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = client.Close() })
 
@@ -69,8 +69,8 @@ func TestIntegration_DNSInteraction(t *testing.T) {
 		t.Skip("skipping integration test in short mode")
 	}
 
-	client, err := New(t.Context(), &Options{
-		KeepAliveInterval: 0, // Disable keep-alive for this test
+	client, err := New(t.Context(), Options{
+		DisableKeepAlive: true,
 	})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = client.Close() })
@@ -126,8 +126,8 @@ func TestIntegration_HTTPInteraction(t *testing.T) {
 		t.Skip("skipping integration test in short mode")
 	}
 
-	client, err := New(t.Context(), &Options{
-		KeepAliveInterval: 0,
+	client, err := New(t.Context(), Options{
+		DisableKeepAlive: true,
 	})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = client.Close() })
@@ -188,8 +188,8 @@ func TestIntegration_SessionPersistence(t *testing.T) {
 	sessionPath := filepath.Join(tmpDir, "session.yaml")
 
 	// Create client and save session
-	client1, err := New(t.Context(), &Options{
-		KeepAliveInterval: 0,
+	client1, err := New(t.Context(), Options{
+		DisableKeepAlive: true,
 	})
 	require.NoError(t, err)
 
@@ -228,9 +228,9 @@ func TestIntegration_MultipleServers(t *testing.T) {
 	}
 
 	// Test that client can connect to any of the default servers
-	client, err := New(t.Context(), &Options{
-		ServerURLs:        DefaultOptions.ServerURLs,
-		KeepAliveInterval: 0,
+	client, err := New(t.Context(), Options{
+		ServerURLs:       DefaultOptions.ServerURLs,
+		DisableKeepAlive: true,
 	})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = client.Close() })
@@ -253,8 +253,8 @@ func TestIntegration_PollingLifecycle(t *testing.T) {
 		t.Skip("skipping integration test in short mode")
 	}
 
-	client, err := New(t.Context(), &Options{
-		KeepAliveInterval: 0,
+	client, err := New(t.Context(), Options{
+		DisableKeepAlive: true,
 	})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = client.Close() })
@@ -289,9 +289,9 @@ func TestIntegration_CustomHTTPTimeout(t *testing.T) {
 		t.Skip("skipping integration test in short mode")
 	}
 
-	client, err := New(t.Context(), &Options{
-		HTTPTimeout:       30 * time.Second,
-		KeepAliveInterval: 0,
+	client, err := New(t.Context(), Options{
+		HTTPTimeout:      30 * time.Second,
+		DisableKeepAlive: true,
 	})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = client.Close() })
