@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"runtime/debug"
 	"strings"
 	"syscall"
 	"time"
@@ -16,10 +17,15 @@ import (
 	"github.com/go-appsec/interactsh-lite/oobclient"
 )
 
-var (
-	version = "dev"
-	rev     = ""
-)
+var version = "dev"
+
+func init() {
+	if version != "dev" {
+		return
+	} else if info, ok := debug.ReadBuildInfo(); ok && info.Main.Version != "" && info.Main.Version != "(devel)" {
+		version = info.Main.Version
+	}
+}
 
 func main() {
 	var (
@@ -84,7 +90,7 @@ func main() {
 
 	pflag.Parse()
 
-	versionStr := version + "-" + rev
+	versionStr := version
 
 	if showVersion {
 		fmt.Printf("interactshlite version %s\n", versionStr)
