@@ -570,14 +570,14 @@ func TestNew(t *testing.T) {
 		client, err := New(t.Context(), Options{
 			ServerURLs:          []string{server.URL},
 			DisableKeepAlive:    true,
-			CorrelationIdLength: 10,
+			CorrelationIdLength: 18,
 		})
 		require.NoError(t, err)
 		t.Cleanup(func() { _ = client.Close() })
 
 		domain := client.Domain()
 		correlationID := strings.Split(domain, ".")[0]
-		assert.Len(t, correlationID, 10)
+		assert.Len(t, correlationID, 18)
 	})
 
 	t.Run("handles_authorization_token", func(t *testing.T) {
@@ -701,21 +701,30 @@ func TestNew(t *testing.T) {
 	t.Run("rejects_short_correlation_id_length", func(t *testing.T) {
 		_, err := New(t.Context(), Options{
 			ServerURLs:          []string{"http://example.com"},
-			CorrelationIdLength: 2,
+			CorrelationIdLength: 3,
 			DisableKeepAlive:    true,
 		})
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "CorrelationIdLength must be at least 3")
+		assert.Contains(t, err.Error(), "CorrelationIdLength must be at least 4")
+	})
+
+	t.Run("rejects_short_correlation_id_default_servers", func(t *testing.T) {
+		_, err := New(t.Context(), Options{
+			CorrelationIdLength: 17,
+			DisableKeepAlive:    true,
+		})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "CorrelationIdLength must be at least 18")
 	})
 
 	t.Run("rejects_short_nonce_length", func(t *testing.T) {
 		_, err := New(t.Context(), Options{
 			ServerURLs:               []string{"http://example.com"},
-			CorrelationIdNonceLength: 2,
+			CorrelationIdNonceLength: 3,
 			DisableKeepAlive:         true,
 		})
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "CorrelationIdNonceLength must be at least 3")
+		assert.Contains(t, err.Error(), "CorrelationIdNonceLength must be at least 4")
 	})
 
 	t.Run("uses_custom_http_client", func(t *testing.T) {

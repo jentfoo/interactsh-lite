@@ -118,10 +118,17 @@ func New(ctx context.Context, opts ...Options) (*Client, error) {
 		correlationIDNonceLength = DefaultOptions.CorrelationIdNonceLength
 	}
 
-	if correlationIDLength < 3 {
-		return nil, errors.New("CorrelationIdLength must be at least 3")
-	} else if correlationIDNonceLength < 3 {
-		return nil, errors.New("CorrelationIdNonceLength must be at least 3")
+	minCorrelationIDLength := 4
+	if !userProvidedServers {
+		// xid layout: [4B timestamp][3B machine][2B PID][3B counter]
+		// 18 chars preserves at least 1 byte of counter, which prevents
+		// collisions between multiple clients in the same process/second.
+		minCorrelationIDLength = 18
+	}
+	if correlationIDLength < minCorrelationIDLength {
+		return nil, fmt.Errorf("CorrelationIdLength must be at least %d", minCorrelationIDLength)
+	} else if correlationIDNonceLength < 4 {
+		return nil, errors.New("CorrelationIdNonceLength must be at least 4")
 	}
 
 	keepAliveInterval := opt.KeepAliveInterval

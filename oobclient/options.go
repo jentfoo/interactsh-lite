@@ -43,11 +43,11 @@ type Options struct {
 	DisableHTTPFallback bool
 
 	// CorrelationIdLength is the length of the correlation ID preamble.
-	// Default: 20
+	// Minimum: 18 with default servers, 4 with custom servers. Default: 20
 	CorrelationIdLength int
 
 	// CorrelationIdNonceLength is the length of the nonce suffix for unique URLs.
-	// Default: 13
+	// Minimum: 4, Default: 8
 	CorrelationIdNonceLength int
 }
 
@@ -58,7 +58,7 @@ var DefaultOptions = Options{
 	HTTPTimeout:              10 * time.Second,
 	KeepAliveInterval:        60 * time.Second,
 	CorrelationIdLength:      20,
-	CorrelationIdNonceLength: 13,
+	CorrelationIdNonceLength: 8,
 }
 
 // fallbackServerURLs are public interactsh servers tried when primary defaults all fail.
