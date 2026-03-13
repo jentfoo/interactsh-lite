@@ -670,6 +670,26 @@ func TestNew(t *testing.T) {
 		assert.Contains(t, err.Error(), "context canceled")
 	})
 
+	t.Run("rejects_short_correlation_id_length", func(t *testing.T) {
+		_, err := New(t.Context(), Options{
+			ServerURLs:          []string{"http://example.com"},
+			CorrelationIdLength: 2,
+			DisableKeepAlive:    true,
+		})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "CorrelationIdLength must be at least 3")
+	})
+
+	t.Run("rejects_short_nonce_length", func(t *testing.T) {
+		_, err := New(t.Context(), Options{
+			ServerURLs:               []string{"http://example.com"},
+			CorrelationIdNonceLength: 2,
+			DisableKeepAlive:         true,
+		})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "CorrelationIdNonceLength must be at least 3")
+	})
+
 	t.Run("uses_custom_http_client", func(t *testing.T) {
 		var customClientCalled bool
 		customTransport := &testRoundTripper{
@@ -1081,7 +1101,7 @@ func TestDecryptInteraction(t *testing.T) {
 		plaintext, err := json.Marshal(interaction)
 		require.NoError(t, err)
 
-		// Encrypt with AES-256-CFB (matching the implementation)
+		// Encrypt with AES-256-CTR (matching the implementation)
 		aesKey := make([]byte, 32)
 		_, err = rand.Read(aesKey)
 		require.NoError(t, err)
@@ -1094,7 +1114,7 @@ func TestDecryptInteraction(t *testing.T) {
 		require.NoError(t, err)
 
 		ciphertext := make([]byte, len(plaintext))
-		stream := cipher.NewCFBEncrypter(block, iv) //nolint:staticcheck // CFB required for interactsh protocol
+		stream := cipher.NewCTR(block, iv)
 		stream.XORKeyStream(ciphertext, plaintext)
 
 		// Prepend IV to ciphertext
@@ -1214,7 +1234,7 @@ func TestPollingWithEncryptedData(t *testing.T) {
 				}
 				plaintext, _ := json.Marshal(interaction)
 
-				// Encrypt with AES-256-CFB
+				// Encrypt with AES-256-CTR
 				aesKey := make([]byte, 32)
 				_, _ = rand.Read(aesKey)
 
@@ -1223,7 +1243,7 @@ func TestPollingWithEncryptedData(t *testing.T) {
 
 				block, _ := aes.NewCipher(aesKey)
 				ciphertext := make([]byte, len(plaintext))
-				stream := cipher.NewCFBEncrypter(block, iv) //nolint:staticcheck // CFB required for interactsh protocol
+				stream := cipher.NewCTR(block, iv)
 				stream.XORKeyStream(ciphertext, plaintext)
 
 				fullCiphertext := append(iv, ciphertext...)
@@ -1344,6 +1364,180 @@ func TestPollingWithEncryptedData(t *testing.T) {
 		require.Len(t, received, 1)
 		assert.Equal(t, "dns", received[0].Protocol)
 		assert.Equal(t, "tld123", received[0].UniqueID)
+	})
+
+	t.Run("trims_trailing_whitespace", func(t *testing.T) {
+		var clientPublicKeyB64 string
+		var mu sync.Mutex
+		var interactions []*Interaction
+
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			switch {
+			case strings.HasSuffix(r.URL.Path, "/register"):
+				var req registerRequest
+				body, _ := io.ReadAll(r.Body)
+				_ = json.Unmarshal(body, &req)
+				mu.Lock()
+				clientPublicKeyB64 = req.PublicKey
+				mu.Unlock()
+
+				w.WriteHeader(http.StatusOK)
+				_, _ = w.Write([]byte(`{"message":"registration successful"}`))
+
+			case strings.HasSuffix(r.URL.Path, "/poll"):
+				mu.Lock()
+				pubKeyB64 := clientPublicKeyB64
+				mu.Unlock()
+
+				if pubKeyB64 == "" {
+					w.WriteHeader(http.StatusOK)
+					_, _ = w.Write([]byte(`{"data":[],"extra":[],"aes_key":""}`))
+					return
+				}
+
+				pubKey, err := decodePublicKey(pubKeyB64)
+				if err != nil {
+					w.WriteHeader(http.StatusInternalServerError)
+					return
+				}
+
+				interaction := Interaction{
+					Protocol:      "http",
+					UniqueID:      "whitespace123",
+					FullId:        "whitespace123.example.com",
+					RemoteAddress: "1.2.3.4",
+				}
+				// Append trailing whitespace to JSON
+				plaintext, _ := json.Marshal(interaction)
+				plaintext = append(plaintext, "\n\t \r\n"...)
+
+				// Encrypt with AES-256-CTR
+				aesKey := make([]byte, 32)
+				_, _ = rand.Read(aesKey)
+
+				iv := make([]byte, aes.BlockSize)
+				_, _ = rand.Read(iv)
+
+				block, _ := aes.NewCipher(aesKey)
+				ciphertext := make([]byte, len(plaintext))
+				stream := cipher.NewCTR(block, iv)
+				stream.XORKeyStream(ciphertext, plaintext)
+
+				fullCiphertext := append(iv, ciphertext...)
+
+				encryptedKey, _ := rsa.EncryptOAEP(sha256.New(), rand.Reader, pubKey, aesKey, nil)
+
+				aesKeyB64 := base64.StdEncoding.EncodeToString(encryptedKey)
+				ciphertextB64 := base64.StdEncoding.EncodeToString(fullCiphertext)
+
+				resp := map[string]interface{}{
+					"data":    []string{ciphertextB64},
+					"extra":   []string{},
+					"aes_key": aesKeyB64,
+				}
+				w.WriteHeader(http.StatusOK)
+				_ = json.NewEncoder(w).Encode(resp)
+
+			case strings.HasSuffix(r.URL.Path, "/deregister"):
+				w.WriteHeader(http.StatusOK)
+			}
+		}))
+		t.Cleanup(server.Close)
+
+		client, err := New(t.Context(), Options{
+			ServerURLs:       []string{server.URL},
+			DisableKeepAlive: true,
+		})
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = client.Close() })
+
+		done := make(chan struct{})
+		callback := func(i *Interaction) {
+			mu.Lock()
+			defer mu.Unlock()
+			interactions = append(interactions, i)
+			select {
+			case <-done:
+			default:
+				close(done)
+			}
+		}
+
+		err = client.StartPolling(50*time.Millisecond, callback)
+		require.NoError(t, err)
+
+		select {
+		case <-done:
+		case <-time.After(2 * time.Second):
+			t.Fatal("timeout waiting for interaction")
+		}
+
+		require.NoError(t, client.StopPolling())
+
+		mu.Lock()
+		defer mu.Unlock()
+		require.Len(t, interactions, 1)
+		assert.Equal(t, "whitespace123", interactions[0].UniqueID)
+	})
+
+	t.Run("skips_empty_tlddata_entries", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			switch {
+			case strings.HasSuffix(r.URL.Path, "/register"):
+				w.WriteHeader(http.StatusOK)
+				_, _ = w.Write([]byte(`{"message":"registration successful"}`))
+			case strings.HasSuffix(r.URL.Path, "/poll"):
+				w.WriteHeader(http.StatusOK)
+				resp := map[string]interface{}{
+					"data":    []string{},
+					"extra":   []string{},
+					"aes_key": "",
+					"tlddata": []string{"", `{"protocol":"dns","unique-id":"tld456","full-id":"tld456.example.com","remote-address":"9.10.11.12"}`, ""},
+				}
+				_ = json.NewEncoder(w).Encode(resp)
+			case strings.HasSuffix(r.URL.Path, "/deregister"):
+				w.WriteHeader(http.StatusOK)
+			}
+		}))
+		t.Cleanup(server.Close)
+
+		client, err := New(t.Context(), Options{
+			ServerURLs:       []string{server.URL},
+			DisableKeepAlive: true,
+		})
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = client.Close() })
+
+		var received []*Interaction
+		var mu sync.Mutex
+		done := make(chan struct{})
+
+		callback := func(i *Interaction) {
+			mu.Lock()
+			defer mu.Unlock()
+			received = append(received, i)
+			select {
+			case <-done:
+			default:
+				close(done)
+			}
+		}
+
+		err = client.StartPolling(50*time.Millisecond, callback)
+		require.NoError(t, err)
+
+		select {
+		case <-done:
+		case <-time.After(2 * time.Second):
+			t.Fatal("timeout waiting for TLD interaction")
+		}
+
+		require.NoError(t, client.StopPolling())
+
+		mu.Lock()
+		defer mu.Unlock()
+		require.Len(t, received, 1)
+		assert.Equal(t, "tld456", received[0].UniqueID)
 	})
 
 	t.Run("skips_malformed_encrypted_data", func(t *testing.T) {

@@ -115,6 +115,12 @@ func New(ctx context.Context, opts ...Options) (*Client, error) {
 		correlationIDNonceLength = DefaultOptions.CorrelationIdNonceLength
 	}
 
+	if correlationIDLength < 3 {
+		return nil, errors.New("CorrelationIdLength must be at least 3")
+	} else if correlationIDNonceLength < 3 {
+		return nil, errors.New("CorrelationIdNonceLength must be at least 3")
+	}
+
 	keepAliveInterval := opt.KeepAliveInterval
 	if opt.DisableKeepAlive {
 		keepAliveInterval = 0
@@ -400,6 +406,8 @@ func (c *Client) pollInteractions(ctx context.Context, callback InteractionCallb
 			continue // Skip failed decryptions
 		}
 
+		plaintext = bytes.TrimRight(plaintext, " \t\r\n")
+
 		var interaction Interaction
 		if err := json.Unmarshal(plaintext, &interaction); err != nil {
 			continue // Skip failed unmarshals
@@ -418,6 +426,9 @@ func (c *Client) pollInteractions(ctx context.Context, callback InteractionCallb
 
 	// Process TLD data
 	for _, tldData := range response.TLDData {
+		if len(tldData) == 0 {
+			continue
+		}
 		var interaction Interaction
 		if err := json.Unmarshal([]byte(tldData), &interaction); err != nil {
 			continue
@@ -459,8 +470,7 @@ func (c *Client) decryptInteraction(aesKeyB64, ciphertextB64 string) ([]byte, er
 		return nil, fmt.Errorf("failed to create AES cipher: %w", err)
 	}
 
-	//nolint:staticcheck // CFB required for interactsh protocol compatibility
-	stream := cipher.NewCFBDecrypter(block, iv)
+	stream := cipher.NewCTR(block, iv)
 	plaintext := make([]byte, len(ciphertext))
 	stream.XORKeyStream(plaintext, ciphertext)
 
