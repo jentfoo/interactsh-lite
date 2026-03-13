@@ -11,6 +11,7 @@ import (
 	"crypto/x509"
 	"encoding/base32"
 	"encoding/base64"
+	"encoding/binary"
 	"encoding/json"
 	"encoding/pem"
 	"errors"
@@ -23,6 +24,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/rs/xid"
@@ -31,6 +33,16 @@ import (
 
 // zbase32Encoding uses the zbase32 alphabet, avoiding visually similar characters for human readability.
 var zbase32Encoding = base32.NewEncoding("ybndrfg8ejkmcpqxot1uwisza345h769").WithPadding(base32.NoPadding)
+
+// serverStartIndex is atomically incremented to round-robin server selection
+// across multiple clients within the same process.
+var serverStartIndex uint32
+
+func init() {
+	var b [4]byte
+	_, _ = rand.Read(b[:])
+	serverStartIndex = binary.LittleEndian.Uint32(b[:])
+}
 
 const rsaKeySize = 2048
 
@@ -185,9 +197,7 @@ func New(ctx context.Context, opts ...Options) (*Client, error) {
 // tryRegisterServers attempts registration starting at a random index.
 func (c *Client) tryRegisterServers(ctx context.Context, serverURLs []string) error {
 	n := len(serverURLs)
-	b := make([]byte, 1)
-	_, _ = rand.Read(b)
-	start := int(b[0]) % n
+	start := int(atomic.AddUint32(&serverStartIndex, 1)) % n
 
 	var errs []error
 	var failedIPs []string
