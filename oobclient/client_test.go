@@ -708,13 +708,13 @@ func TestNew(t *testing.T) {
 		assert.Contains(t, err.Error(), "CorrelationIdLength must be at least 4")
 	})
 
-	t.Run("rejects_short_correlation_id_default_servers", func(t *testing.T) {
+	t.Run("rejects_custom_cidl_default_servers", func(t *testing.T) {
 		_, err := New(t.Context(), Options{
-			CorrelationIdLength: 17,
+			CorrelationIdLength: 19,
 			DisableKeepAlive:    true,
 		})
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "CorrelationIdLength must be at least 18")
+		assert.Contains(t, err.Error(), "CorrelationIdLength must be 20 when using default servers")
 	})
 
 	t.Run("rejects_short_nonce_length", func(t *testing.T) {
@@ -751,7 +751,7 @@ func TestNew(t *testing.T) {
 		assert.True(t, customClientCalled)
 	})
 
-	t.Run("falls_back_on_default_failure", func(t *testing.T) {
+	t.Run("fallback_bumps_nonce_length", func(t *testing.T) {
 		fallbackServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusOK)
 			_, _ = w.Write([]byte(`{"message":"registration successful"}`))
@@ -775,6 +775,43 @@ func TestNew(t *testing.T) {
 		})
 		require.NoError(t, err)
 		t.Cleanup(func() { _ = client.Close() })
+
+		// Nonce length should have been bumped to match fallback servers (cidn=13)
+		assert.Equal(t, fallbackMinNonceLength, client.correlationIDNonceLength)
+
+		url := client.URL()
+		parts := strings.SplitN(url, ".", 2)
+		assert.Len(t, parts[0], DefaultOptions.CorrelationIdLength+fallbackMinNonceLength)
+	})
+
+	t.Run("fallback_keeps_larger_nonce", func(t *testing.T) {
+		fallbackServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"message":"registration successful"}`))
+		}))
+		t.Cleanup(fallbackServer.Close)
+
+		origDefaults := DefaultOptions.ServerURLs
+		origFallback := fallbackServerURLs
+		t.Cleanup(func() {
+			DefaultOptions.ServerURLs = origDefaults
+			fallbackServerURLs = origFallback
+		})
+
+		DefaultOptions.ServerURLs = []string{"http://invalid.local:9999"}
+		fallbackServerURLs = []string{fallbackServer.URL}
+
+		client, err := New(t.Context(), Options{
+			HTTPTimeout:              100 * time.Millisecond,
+			DisableKeepAlive:         true,
+			DisableHTTPFallback:      true,
+			CorrelationIdNonceLength: 20,
+		})
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = client.Close() })
+
+		// User's larger nonce should be preserved
+		assert.Equal(t, 20, client.correlationIDNonceLength)
 	})
 
 	t.Run("no_fallback_with_user_servers", func(t *testing.T) {

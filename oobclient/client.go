@@ -130,16 +130,15 @@ func New(ctx context.Context, opts ...Options) (*Client, error) {
 		correlationIDNonceLength = DefaultOptions.CorrelationIdNonceLength
 	}
 
-	minCorrelationIDLength := 4
 	if !userProvidedServers {
-		// xid layout: [4B timestamp][3B machine][2B PID][3B counter]
-		// 18 chars preserves at least 1 byte of counter, which prevents
-		// collisions between multiple clients in the same process/second.
-		minCorrelationIDLength = 18
+		// Default servers have a fixed cidl; the client must match exactly.
+		if opt.CorrelationIdLength != 0 && correlationIDLength != DefaultOptions.CorrelationIdLength {
+			return nil, fmt.Errorf("CorrelationIdLength must be %d when using default servers", DefaultOptions.CorrelationIdLength)
+		}
+	} else if correlationIDLength < 4 {
+		return nil, errors.New("CorrelationIdLength must be at least 4")
 	}
-	if correlationIDLength < minCorrelationIDLength {
-		return nil, fmt.Errorf("CorrelationIdLength must be at least %d", minCorrelationIDLength)
-	} else if correlationIDNonceLength < 4 {
+	if correlationIDNonceLength < 4 {
 		return nil, errors.New("CorrelationIdNonceLength must be at least 4")
 	}
 
@@ -182,7 +181,12 @@ func New(ctx context.Context, opts ...Options) (*Client, error) {
 	if err := client.tryRegisterServers(ctx, serverURLs); err != nil {
 		if userProvidedServers || len(fallbackServerURLs) == 0 {
 			return nil, err
-		} else if fallbackErr := client.tryRegisterServers(ctx, fallbackServerURLs); fallbackErr != nil {
+		}
+		// Fallback servers (public oast.*) require a longer nonce (cidn=13)
+		if client.correlationIDNonceLength < fallbackMinNonceLength {
+			client.correlationIDNonceLength = fallbackMinNonceLength
+		}
+		if fallbackErr := client.tryRegisterServers(ctx, fallbackServerURLs); fallbackErr != nil {
 			return nil, errors.Join(err, fallbackErr)
 		}
 	}

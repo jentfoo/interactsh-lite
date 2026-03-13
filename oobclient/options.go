@@ -43,11 +43,13 @@ type Options struct {
 	DisableHTTPFallback bool
 
 	// CorrelationIdLength is the length of the correlation ID preamble.
-	// Minimum: 18 with default servers, 4 with custom servers. Default: 20
+	// Must match server configuration exactly. Cannot be customized with default servers.
+	// Minimum: 4 with custom servers. Default: 20
 	CorrelationIdLength int
 
 	// CorrelationIdNonceLength is the length of the nonce suffix for unique URLs.
-	// Minimum: 4, Default: 8
+	// Must be >= the server's configured cidn for interactions to be matched.
+	// Minimum: 4. Default: 8
 	CorrelationIdNonceLength int
 }
 
@@ -64,6 +66,10 @@ var DefaultOptions = Options{
 // fallbackServerURLs are public interactsh servers tried when primary defaults all fail.
 // Only used when the caller did not explicitly provide ServerURLs.
 var fallbackServerURLs = []string{"oast.pro", "oast.live", "oast.site", "oast.online", "oast.fun", "oast.me"}
+
+// fallbackMinNonceLength is the minimum CorrelationIdNonceLength required by
+// fallback servers (public oast.* servers use the interactsh default cidn=13).
+const fallbackMinNonceLength = 13
 
 // newSecureHTTPClient creates an HTTP client with secure defaults:
 // - Does NOT follow redirects (returns error on redirect)
