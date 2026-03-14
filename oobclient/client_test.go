@@ -12,7 +12,6 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -339,60 +338,34 @@ func TestClientDomain(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = client.Close() })
 
-	domain := client.Domain()
-
-	serverURL, _ := url.Parse(server.URL)
-	assert.Contains(t, domain, serverURL.Host)
-	assert.Len(t, strings.Split(domain, ".")[0], DefaultOptions.CorrelationIdLength)
-}
-
-func TestClientURL(t *testing.T) {
-	t.Parallel()
-
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{"message":"registration successful"}`))
-	}))
-	t.Cleanup(server.Close)
-
-	client, err := New(t.Context(), Options{
-		ServerURLs:       []string{server.URL},
-		DisableKeepAlive: true,
-	})
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = client.Close() })
-
 	t.Run("contains_server_host", func(t *testing.T) {
-		u := client.URL()
-		serverURL, _ := url.Parse(server.URL)
-		assert.Contains(t, u, serverURL.Host)
+		u := client.Domain()
+		assert.Contains(t, u, client.ServerHost())
+	})
+
+	t.Run("starts_with_correlation_id", func(t *testing.T) {
+		u := client.Domain()
+		assert.True(t, strings.HasPrefix(u, client.CorrelationID()))
 	})
 
 	t.Run("unique_per_call", func(t *testing.T) {
 		seen := make(map[string]bool)
 		for i := 0; i < 100; i++ {
-			u := client.URL()
-			assert.False(t, seen[u], "duplicate URL generated")
+			u := client.Domain()
+			assert.False(t, seen[u], "duplicate domain generated")
 			seen[u] = true
 		}
 	})
 
-	t.Run("starts_with_correlation_id", func(t *testing.T) {
-		u := client.URL()
-		domain := client.Domain()
-		correlationID := strings.Split(domain, ".")[0]
-		assert.True(t, strings.HasPrefix(u, correlationID))
-	})
-
 	t.Run("correct_total_length", func(t *testing.T) {
-		u := client.URL()
+		u := client.Domain()
 		parts := strings.SplitN(u, ".", 2)
 		expectedLen := DefaultOptions.CorrelationIdLength + DefaultOptions.CorrelationIdNonceLength
 		assert.Len(t, parts[0], expectedLen)
 	})
 
 	t.Run("nonce_is_zbase32", func(t *testing.T) {
-		u := client.URL()
+		u := client.Domain()
 		parts := strings.SplitN(u, ".", 2)
 		nonce := parts[0][DefaultOptions.CorrelationIdLength:]
 
@@ -400,6 +373,13 @@ func TestClientURL(t *testing.T) {
 		for _, c := range nonce {
 			assert.Contains(t, validChars, string(c))
 		}
+	})
+
+	t.Run("deprecated_url_matches", func(t *testing.T) {
+		u := client.URL()
+		parts := strings.SplitN(u, ".", 2)
+		expectedLen := DefaultOptions.CorrelationIdLength + DefaultOptions.CorrelationIdNonceLength
+		assert.Len(t, parts[0], expectedLen)
 	})
 }
 
@@ -427,8 +407,6 @@ func TestSaveLoadSession(t *testing.T) {
 		require.NoError(t, err)
 		t.Cleanup(func() { _ = client.Close() })
 
-		originalDomain := client.Domain()
-
 		tmpDir := t.TempDir()
 		sessionPath := filepath.Join(tmpDir, "session.yaml")
 
@@ -445,7 +423,7 @@ func TestSaveLoadSession(t *testing.T) {
 		require.NoError(t, err)
 		t.Cleanup(func() { _ = loaded.Close() })
 
-		assert.Equal(t, originalDomain, loaded.Domain())
+		assert.Equal(t, client.CorrelationID(), loaded.CorrelationID())
 	})
 
 	t.Run("file_not_found", func(t *testing.T) {
@@ -555,9 +533,7 @@ func TestNew(t *testing.T) {
 		require.NoError(t, err)
 		t.Cleanup(func() { _ = client.Close() })
 
-		domain := client.Domain()
-		correlationID := strings.Split(domain, ".")[0]
-		assert.Len(t, correlationID, DefaultOptions.CorrelationIdLength)
+		assert.Len(t, client.CorrelationID(), DefaultOptions.CorrelationIdLength)
 	})
 
 	t.Run("respects_custom_correlation_id_length", func(t *testing.T) {
@@ -575,9 +551,7 @@ func TestNew(t *testing.T) {
 		require.NoError(t, err)
 		t.Cleanup(func() { _ = client.Close() })
 
-		domain := client.Domain()
-		correlationID := strings.Split(domain, ".")[0]
-		assert.Len(t, correlationID, 18)
+		assert.Len(t, client.CorrelationID(), 18)
 	})
 
 	t.Run("handles_authorization_token", func(t *testing.T) {
@@ -779,8 +753,8 @@ func TestNew(t *testing.T) {
 		// Nonce length should have been bumped to match fallback servers (cidn=13)
 		assert.Equal(t, fallbackMinNonceLength, client.correlationIDNonceLength)
 
-		url := client.URL()
-		parts := strings.SplitN(url, ".", 2)
+		domain := client.Domain()
+		parts := strings.SplitN(domain, ".", 2)
 		assert.Len(t, parts[0], DefaultOptions.CorrelationIdLength+fallbackMinNonceLength)
 	})
 
@@ -980,8 +954,7 @@ func TestDeregistration(t *testing.T) {
 		})
 		require.NoError(t, err)
 
-		domain := client.Domain()
-		correlationID := strings.Split(domain, ".")[0]
+		correlationID := client.CorrelationID()
 
 		err = client.Close()
 		require.NoError(t, err)
@@ -1098,7 +1071,7 @@ func TestConcurrentAccess(t *testing.T) {
 			go func() {
 				defer wg.Done()
 				for j := 0; j < urlsPerGoroutine; j++ {
-					urlChan <- client.URL()
+					urlChan <- client.Domain()
 				}
 			}()
 		}

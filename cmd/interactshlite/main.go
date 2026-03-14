@@ -228,7 +228,7 @@ func main() {
 
 	payloads := make([]string, payloadCount)
 	for i := range payloads {
-		payloads[i] = client.URL()
+		payloads[i] = client.Domain()
 	}
 
 	fmt.Printf("[INF] Listing %d payload for OOB Testing\n", payloadCount)

@@ -32,12 +32,13 @@ func TestIntegration_NewClient(t *testing.T) {
 	assert.NotEmpty(t, domain)
 	assert.Contains(t, domain, ".")
 
-	// Verify domain format: correlation-id.server
+	// Verify domain format: correlation-id + nonce.server
 	parts := strings.SplitN(domain, ".", 2)
-	assert.Len(t, parts[0], DefaultOptions.CorrelationIdLength)
+	expectedLen := DefaultOptions.CorrelationIdLength + DefaultOptions.CorrelationIdNonceLength
+	assert.Len(t, parts[0], expectedLen)
 }
 
-func TestIntegration_URLGeneration(t *testing.T) {
+func TestIntegration_DomainGeneration(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test in short mode")
 	}
@@ -46,22 +47,20 @@ func TestIntegration_URLGeneration(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = client.Close() })
 
-	url1 := client.URL()
-	url2 := client.URL()
+	domain1 := client.Domain()
+	domain2 := client.Domain()
 
-	// URLs should be unique
-	assert.NotEqual(t, url1, url2)
+	// Domains should be unique
+	assert.NotEqual(t, domain1, domain2)
 
 	// Both should share the correlation ID prefix
-	domain := client.Domain()
-	correlationID := strings.Split(domain, ".")[0]
-	assert.True(t, strings.HasPrefix(url1, correlationID))
-	assert.True(t, strings.HasPrefix(url2, correlationID))
+	assert.True(t, strings.HasPrefix(domain1, client.CorrelationID()))
+	assert.True(t, strings.HasPrefix(domain2, client.CorrelationID()))
 
 	// Total length should be correlation ID + nonce + server
 	expectedPrefixLen := DefaultOptions.CorrelationIdLength + DefaultOptions.CorrelationIdNonceLength
-	url1Parts := strings.SplitN(url1, ".", 2)
-	assert.Len(t, url1Parts[0], expectedPrefixLen)
+	parts := strings.SplitN(domain1, ".", 2)
+	assert.Len(t, parts[0], expectedPrefixLen)
 }
 
 func TestIntegration_DNSInteraction(t *testing.T) {
@@ -76,7 +75,7 @@ func TestIntegration_DNSInteraction(t *testing.T) {
 	t.Cleanup(func() { _ = client.Close() })
 
 	// Generate a unique URL and resolve it via DNS
-	payloadURL := client.URL()
+	payloadURL := client.Domain()
 
 	// Perform DNS lookup to trigger interaction
 	_, _ = net.LookupHost(payloadURL)
@@ -133,7 +132,7 @@ func TestIntegration_HTTPInteraction(t *testing.T) {
 	t.Cleanup(func() { _ = client.Close() })
 
 	// Generate a unique URL
-	payloadURL := client.URL()
+	payloadURL := client.Domain()
 	httpURL := "http://" + payloadURL
 
 	// Make HTTP request to trigger interaction
@@ -193,9 +192,6 @@ func TestIntegration_SessionPersistence(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	originalDomain := client1.Domain()
-	originalURL := client1.URL()
-
 	err = client1.SaveSession(sessionPath)
 	require.NoError(t, err)
 
@@ -212,14 +208,8 @@ func TestIntegration_SessionPersistence(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = client2.Close() })
 
-	// Domain should match (same correlation ID)
-	assert.Equal(t, originalDomain, client2.Domain())
-
-	// New URLs should still start with same correlation ID
-	newURL := client2.URL()
-	originalCorrelationID := strings.Split(originalURL, ".")[0][:DefaultOptions.CorrelationIdLength]
-	newCorrelationID := strings.Split(newURL, ".")[0][:DefaultOptions.CorrelationIdLength]
-	assert.Equal(t, originalCorrelationID, newCorrelationID)
+	// Loaded session should preserve the correlation ID
+	assert.Equal(t, client1.CorrelationID(), client2.CorrelationID())
 }
 
 func TestIntegration_MultipleServers(t *testing.T) {

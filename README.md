@@ -145,8 +145,8 @@ func main() {
     }
     defer client.Close()
 
-    // Generate a unique payload URL
-    payloadURL := client.URL()
+    // Generate a unique payload domain
+    payloadURL := client.Domain()
     fmt.Printf("Inject this URL in your target: %s\n", payloadURL)
 
     // Start polling for interactions
@@ -216,18 +216,18 @@ if errors.Is(err, oobclient.ErrClientClosed) {
 }
 ```
 
-#### Base Domain vs Unique URLs
+#### Domain / Payload Generation
 
 ```go
-// Domain() returns the base domain (static for client lifetime)
-baseDomain := client.Domain()
-// Example: "cn4h7pjqdka31f8e5g6b.alpha.oastsrv.net" (20-char correlation ID)
+// Domain() returns a unique domain for each call, suitable for correlating
+// specific test cases with their interactions.
+url1 := client.Domain()
+url2 := client.Domain()
+// Example: "cn4h7pjqdka31f8e5g6bry8djt4un3h1x.alpha.oastsrv.net" (20-char correlation ID + 13-char nonce)
+// Example: "cn4h7pjqdka31f8e5g6bkne9wfg4a3mt1.alpha.oastsrv.net"
+// Both share the same correlation ID prefix but have unique nonces.
 
-// URL() returns unique URLs for each test case
-url1 := client.URL()
-url2 := client.URL()
-// Example: "cn4h7pjqdka31f8e5g6bry8djt4un3h1x.alpha.oastsrv.net" (20 + 13 chars)
-// Example: "cn4h7pjqdka31f8e5g6bkne9wfg4a3mt1.alpha.oastsrv.net" (20 + 13 chars)
+// URL() is deprecated — use Domain() instead. URL() delegates to Domain().
 ```
 
 ### Migration from ProjectDiscovery/Interactsh
@@ -261,6 +261,16 @@ This library is a mostly drop-in replacement for the [official Interactsh](https
 Key differences:
 - `New()` now takes a `context.Context` as the first parameter
 - `ServerURL` (string) is now `ServerURLs` ([]string)
+
+#### Payload Generation
+
+```diff
+-// GeneratePayloadURL() generated unique payload domains
+-url := c.GeneratePayloadURL()
++// Domain() is now the primary method (each call returns a unique domain with a nonce)
++domain := c.Domain()
++// URL() still works but is deprecated — it delegates to Domain()
+```
 
 #### Polling for Interactions
 
