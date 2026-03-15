@@ -5,9 +5,9 @@
 
 These Terms of Service ("Terms") govern your use of the hosted Out-of-Band
 Application Security Testing ("OAST") services operated on `*.oastsrv.net`
-("Service") by the interactsh-lite project ("Project"). By using the Service,
-you agree to be bound by these Terms. If you do not agree, do not use the
-Service.
+and `*.oastlab.net` ("Service") by the interactsh-lite project ("Project").
+By using the Service, you agree to be bound by these Terms. If you do not
+agree, do not use the Service.
 
 ## 1. Authorized Use Only
 
