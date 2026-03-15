@@ -226,8 +226,6 @@ url2 := client.Domain()
 // Example: "cn4h7pjqdka31f8e5g6bry8djt4un3h1x.alpha.oastsrv.net" (20-char correlation ID + 13-char nonce)
 // Example: "cn4h7pjqdka31f8e5g6bkne9wfg4a3mt1.alpha.oastsrv.net"
 // Both share the same correlation ID prefix but have unique nonces.
-
-// URL() is deprecated — use Domain() instead. URL() delegates to Domain().
 ```
 
 ### Migration from ProjectDiscovery/Interactsh
@@ -269,7 +267,6 @@ Key differences:
 -url := c.GeneratePayloadURL()
 +// Domain() is now the primary method (each call returns a unique domain with a nonce)
 +domain := c.Domain()
-+// URL() still works but is deprecated — it delegates to Domain()
 ```
 
 #### Polling for Interactions
