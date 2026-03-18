@@ -64,7 +64,7 @@ number: 10
 		cfg, err := LoadConfig("/nonexistent/path/config.yaml")
 		require.NoError(t, err)
 
-		assert.Equal(t, "oscar.oastsrv.net,alpha.oastsrv.net,sierra.oastsrv.net,tango.oastsrv.net", cfg.Server)
+		assert.Empty(t, cfg.Server)
 		assert.Equal(t, 1, cfg.Number)
 		assert.Equal(t, 5, cfg.PollInterval)
 		assert.Zero(t, cfg.CorrelationIdLength)

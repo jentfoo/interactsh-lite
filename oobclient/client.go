@@ -107,7 +107,7 @@ func New(ctx context.Context, opts ...Options) (*Client, error) {
 	}
 
 	serverURLs := opt.ServerURLs
-	userProvidedServers := len(serverURLs) > 0
+	userProvidedServers := len(serverURLs) > 0 && !slices.Equal(serverURLs, DefaultOptions.ServerURLs)
 	if !userProvidedServers {
 		serverURLs = DefaultOptions.ServerURLs
 	}
