@@ -159,7 +159,7 @@ Content-Length: <length>
 {
     "public-key": "<base64-encoded PEM public key>",
     "secret-key": "<UUID v4 string>",
-    "correlation-id": "<20-character alphanumeric string>"
+    "correlation-id": "<alphanumeric string of CorrelationIdLength characters>"
 }
 ```
 
@@ -364,14 +364,11 @@ The path `/b64_body:<base64>/` is also supported for base64-encoded body respons
 
 Generate a unique correlation ID at client creation:
 
-1. Generate a random ID using a unique ID generator (e.g., xid, ksuid, or random bytes)
-2. Truncate or pad to exactly `CorrelationIdLength` characters (default: 20)
-3. Characters must be lowercase alphanumeric (a-z, 0-9)
-
-**XID format (used by reference implementation):**
-- 12 bytes: 4-byte timestamp + 5-byte machine ID + 3-byte counter
-- Base32 encoded (Crockford variant)
-- Truncated to 20 characters
+1. Generate a time-sortable ID of exactly `CorrelationIdLength` characters (default: 20)
+2. The top 20 bits encode the current hour (`unix_seconds / 3600`) for sort ordering
+3. Remaining bits are filled with `crypto/rand` random data
+4. Encoded using xid-compatible base32 alphabet (`0123456789abcdefghijklmnopqrstuv`)
+5. Characters must be lowercase alphanumeric (a-v, 0-9)
 
 ### Secret Key Generation
 
@@ -387,9 +384,8 @@ The base domain combines the correlation ID with the server host:
 
 ```
 <correlation-id>.<server-host>
-|---- 20 chars ----|
 
-Example: ck9jfz4x6o1s3d8w2yzn.alpha.oastsrv.net
+Example: 7k5a3bf9m1qr.alpha.oastsrv.net
 ```
 
 This value is static for the lifetime of a client session.
@@ -411,10 +407,8 @@ ybndrfg8ejkmcpqxot1uwisza345h769
 **URL Structure:**
 ```
 <correlation-id><nonce>.<server-host>
-|---- 20 chars ----|-- 13 --|
-|------- 33 chars total -----|
 
-Example: ck9jfz4x6o1s3d8w2yznabcdefghijk.alpha.oastsrv.net
+Example: 7k5a3bf9m1qrabcdefgh.alpha.oastsrv.net
 ```
 
 **Important:** The URL does NOT include a scheme (http/https). It is a bare domain suitable for:

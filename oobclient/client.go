@@ -28,7 +28,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/rs/xid"
 	"gopkg.in/yaml.v3"
 )
 
@@ -124,7 +123,11 @@ func New(ctx context.Context, opts ...Options) (*Client, error) {
 
 	correlationIDLength := opt.CorrelationIdLength
 	if correlationIDLength == 0 {
-		correlationIDLength = DefaultOptions.CorrelationIdLength
+		if userProvidedServers {
+			correlationIDLength = DefaultOptions.CorrelationIdLength
+		} else {
+			correlationIDLength = defaultServerCorrelationIdLength
+		}
 	}
 	correlationIDNonceLength := opt.CorrelationIdNonceLength
 	if correlationIDNonceLength == 0 {
@@ -133,8 +136,8 @@ func New(ctx context.Context, opts ...Options) (*Client, error) {
 
 	if !userProvidedServers {
 		// Default servers have a fixed cidl; the client must match exactly.
-		if opt.CorrelationIdLength != 0 && correlationIDLength != DefaultOptions.CorrelationIdLength {
-			return nil, fmt.Errorf("CorrelationIdLength must be %d when using default servers", DefaultOptions.CorrelationIdLength)
+		if opt.CorrelationIdLength != 0 && correlationIDLength != defaultServerCorrelationIdLength {
+			return nil, fmt.Errorf("CorrelationIdLength must be %d when using default servers", defaultServerCorrelationIdLength)
 		}
 	} else if correlationIDLength < 4 {
 		return nil, errors.New("CorrelationIdLength must be at least 4")
@@ -159,9 +162,9 @@ func New(ctx context.Context, opts ...Options) (*Client, error) {
 		return nil, fmt.Errorf("failed to encode public key: %w", err)
 	}
 
-	correlationID := xid.New().String()
-	if len(correlationID) > correlationIDLength {
-		correlationID = correlationID[:correlationIDLength]
+	correlationID, err := generateCorrelationID(correlationIDLength)
+	if err != nil {
+		return nil, err
 	}
 	secretKey := generateUUID4()
 
@@ -183,7 +186,14 @@ func New(ctx context.Context, opts ...Options) (*Client, error) {
 		if userProvidedServers || len(fallbackServerURLs) == 0 {
 			return nil, err
 		}
-		// Fallback servers (public oast.*) require a longer nonce (cidn=13)
+		// Fallback servers (public oast.*) require longer correlation ID and nonce
+		if len(client.correlationID) < fallbackCorrelationIdLength {
+			newID, genErr := generateCorrelationID(fallbackCorrelationIdLength)
+			if genErr != nil {
+				return nil, genErr
+			}
+			client.correlationID = newID
+		}
 		if client.correlationIDNonceLength < fallbackMinNonceLength {
 			client.correlationIDNonceLength = fallbackMinNonceLength
 		}
@@ -862,6 +872,54 @@ func decodePublicKey(data string) (*rsa.PublicKey, error) {
 	}
 
 	return rsaPubKey, nil
+}
+
+// xidEncoding is the base32 alphabet used by xid.
+const xidEncoding = "0123456789abcdefghijklmnopqrstuv"
+
+// generateCorrelationID creates a base32-encoded ID whose first 4 characters sort
+// with xid timestamps at ~68-minute granularity; remaining characters are random.
+func generateCorrelationID(length int) (string, error) {
+	// 13 bytes: 12 data bytes (xid layout) + 1 zero padding byte so the
+	// encoder can safely read across the last byte boundary
+	var raw [13]byte
+	if _, err := rand.Read(raw[:12]); err != nil {
+		return "", err
+	}
+
+	// Stamp the top 20 bits of the Unix timestamp into raw[0:3],
+	// preserving random data in the lower 12 bits
+	ts := uint32(time.Now().Unix())
+	raw[0] = byte(ts >> 24)
+	raw[1] = byte(ts >> 16)
+	raw[2] = raw[2]&0x0F | byte(ts>>8)&0xF0
+
+	// xid-compatible base32: extract 5-bit groups MSB-first
+	buf := make([]byte, length)
+	n := min(length, 20)
+	for i := range n {
+		bitOff := i * 5
+		byteIdx := bitOff / 8
+		bitIdx := bitOff % 8
+		if bitIdx <= 3 {
+			buf[i] = xidEncoding[(raw[byteIdx]>>(3-bitIdx))&0x1F]
+		} else {
+			buf[i] = xidEncoding[((raw[byteIdx]<<(bitIdx-3))|(raw[byteIdx+1]>>(11-bitIdx)))&0x1F]
+		}
+	}
+
+	// Characters beyond 20 are pure random base32
+	if length > 20 {
+		rb := make([]byte, length-20)
+		if _, err := rand.Read(rb); err != nil {
+			return "", err
+		}
+		for i, b := range rb {
+			buf[20+i] = xidEncoding[b&0x1F]
+		}
+	}
+
+	return string(buf), nil
 }
 
 // generateUUID4 generates a random UUID v4 string using crypto/rand.

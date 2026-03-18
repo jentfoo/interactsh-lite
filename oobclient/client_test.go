@@ -56,6 +56,61 @@ func TestGenerateUUID4(t *testing.T) {
 	})
 }
 
+func TestGenerateCorrelationID(t *testing.T) {
+	t.Parallel()
+
+	t.Run("correct_length", func(t *testing.T) {
+		for _, length := range []int{4, 8, 10, 12, 16, 18, 20} {
+			id, err := generateCorrelationID(length)
+			require.NoError(t, err)
+			assert.Len(t, id, length)
+		}
+	})
+
+	t.Run("valid_alphabet", func(t *testing.T) {
+		id, err := generateCorrelationID(2000)
+		require.NoError(t, err)
+		for _, c := range id {
+			assert.Contains(t, xidEncoding, string(c))
+		}
+	})
+
+	t.Run("unique_valid_values", func(t *testing.T) {
+		seen := make(map[string]bool)
+		for i := 0; i < 1000; i++ {
+			id, err := generateCorrelationID(20)
+			require.NoError(t, err)
+			assert.False(t, seen[id])
+			seen[id] = true
+		}
+	})
+
+	t.Run("timestamp_prefix", func(t *testing.T) {
+		ts := uint32(time.Now().Unix())
+		expected := string([]byte{
+			xidEncoding[(ts>>27)&0x1F],
+			xidEncoding[(ts>>22)&0x1F],
+			xidEncoding[(ts>>17)&0x1F],
+			xidEncoding[(ts>>12)&0x1F],
+		})
+		for _, length := range []int{4, 12, 20} {
+			id, err := generateCorrelationID(length)
+			require.NoError(t, err)
+			assert.Equal(t, expected, id[:4])
+		}
+	})
+
+	t.Run("random_entropy", func(t *testing.T) {
+		seen := make(map[byte]bool)
+		for range 200 {
+			id, err := generateCorrelationID(12)
+			require.NoError(t, err)
+			seen[id[4]] = true
+		}
+		assert.Greater(t, len(seen), 10)
+	})
+}
+
 func TestTryRegisterServers(t *testing.T) {
 	t.Parallel()
 
@@ -747,11 +802,11 @@ func TestNew(t *testing.T) {
 
 	t.Run("rejects_custom_cidl_default_servers", func(t *testing.T) {
 		_, err := New(t.Context(), Options{
-			CorrelationIdLength: 19,
+			CorrelationIdLength: 11,
 			DisableKeepAlive:    true,
 		})
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "CorrelationIdLength must be 20 when using default servers")
+		assert.Contains(t, err.Error(), "CorrelationIdLength must be 12 when using default servers")
 	})
 
 	t.Run("rejects_short_nonce_length", func(t *testing.T) {
@@ -816,9 +871,11 @@ func TestNew(t *testing.T) {
 		// Nonce length should have been bumped to match fallback servers (cidn=13)
 		assert.Equal(t, fallbackMinNonceLength, client.correlationIDNonceLength)
 
+		assert.Len(t, client.CorrelationID(), fallbackCorrelationIdLength)
+
 		domain := client.Domain()
 		parts := strings.SplitN(domain, ".", 2)
-		assert.Len(t, parts[0], DefaultOptions.CorrelationIdLength+fallbackMinNonceLength)
+		assert.Len(t, parts[0], fallbackCorrelationIdLength+fallbackMinNonceLength)
 	})
 
 	t.Run("fallback_keeps_larger_nonce", func(t *testing.T) {
