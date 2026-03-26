@@ -12,6 +12,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -608,6 +609,72 @@ public-key: "dGVzdA=="`
 		assert.Contains(t, err.Error(), "failed to decode public key")
 	})
 
+	t.Run("save_to_invalid_path", func(t *testing.T) {
+		server := newMockServer(t)
+
+		client, err := New(t.Context(), Options{
+			ServerURLs:       []string{server.URL},
+			DisableKeepAlive: true,
+		})
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = client.Close() })
+
+		err = client.SaveSession("/nonexistent/dir/session.yaml")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to write session file")
+	})
+
+	t.Run("load_with_custom_options", func(t *testing.T) {
+		server := newMockServer(t)
+
+		client, err := New(t.Context(), Options{
+			ServerURLs:       []string{server.URL},
+			DisableKeepAlive: true,
+		})
+		require.NoError(t, err)
+
+		tmpDir := t.TempDir()
+		sessionPath := filepath.Join(tmpDir, "session.yaml")
+		require.NoError(t, client.SaveSession(sessionPath))
+		require.NoError(t, client.Close())
+
+		loaded, err := LoadSession(t.Context(), sessionPath, Options{
+			HTTPTimeout:              5 * time.Second,
+			KeepAliveInterval:        30 * time.Second,
+			CorrelationIdNonceLength: 12,
+			DisableHTTPFallback:      true,
+		})
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = loaded.Close() })
+
+		assert.Equal(t, 12, loaded.correlationIDNonceLength)
+		assert.True(t, loaded.disableHTTPFallback)
+		assert.Equal(t, 30*time.Second, loaded.keepAliveInterval)
+	})
+
+	t.Run("load_with_disable_keep_alive", func(t *testing.T) {
+		server := newMockServer(t)
+
+		client, err := New(t.Context(), Options{
+			ServerURLs:       []string{server.URL},
+			DisableKeepAlive: true,
+		})
+		require.NoError(t, err)
+
+		tmpDir := t.TempDir()
+		sessionPath := filepath.Join(tmpDir, "session.yaml")
+		require.NoError(t, client.SaveSession(sessionPath))
+		require.NoError(t, client.Close())
+
+		loaded, err := LoadSession(t.Context(), sessionPath, Options{
+			DisableKeepAlive: true,
+		})
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = loaded.Close() })
+
+		assert.Zero(t, loaded.keepAliveInterval)
+	})
+
 	t.Run("reregistration_failure", func(t *testing.T) {
 		// First create a valid session with a working server
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -930,6 +997,141 @@ func TestNew(t *testing.T) {
 	})
 }
 
+func TestPollInteractions(t *testing.T) {
+	t.Parallel()
+
+	t.Run("sends_authorization_token", func(t *testing.T) {
+		var receivedToken string
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			receivedToken = r.Header.Get("Authorization")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"data":[],"extra":[],"aes_key":""}`))
+		}))
+		t.Cleanup(server.Close)
+
+		parsed, _ := url.Parse(server.URL)
+		client := &Client{
+			serverURL:     parsed,
+			token:         "my-secret-token",
+			httpClient:    newSecureHTTPClient(time.Second),
+			correlationID: "testcid",
+			secretKey:     "testsecret",
+		}
+
+		err := client.pollInteractions(t.Context(), func(*Interaction) {})
+		require.NoError(t, err)
+		assert.Equal(t, "my-secret-token", receivedToken)
+	})
+
+	t.Run("returns_unauthorized", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusUnauthorized)
+		}))
+		t.Cleanup(server.Close)
+
+		parsed, _ := url.Parse(server.URL)
+		client := &Client{
+			serverURL:  parsed,
+			httpClient: newSecureHTTPClient(time.Second),
+		}
+
+		err := client.pollInteractions(t.Context(), func(*Interaction) {})
+		assert.ErrorIs(t, err, ErrUnauthorized)
+	})
+
+	t.Run("returns_generic_error_status", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusInternalServerError)
+			_, _ = w.Write([]byte("internal failure"))
+		}))
+		t.Cleanup(server.Close)
+
+		parsed, _ := url.Parse(server.URL)
+		client := &Client{
+			serverURL:  parsed,
+			httpClient: newSecureHTTPClient(time.Second),
+		}
+
+		err := client.pollInteractions(t.Context(), func(*Interaction) {})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "poll failed with status 500")
+		assert.Contains(t, err.Error(), "internal failure")
+	})
+
+	t.Run("returns_error_on_invalid_json", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`not json`))
+		}))
+		t.Cleanup(server.Close)
+
+		parsed, _ := url.Parse(server.URL)
+		client := &Client{
+			serverURL:  parsed,
+			httpClient: newSecureHTTPClient(time.Second),
+		}
+
+		err := client.pollInteractions(t.Context(), func(*Interaction) {})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to decode poll response")
+	})
+
+	t.Run("skips_invalid_json_in_extra", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+			resp := map[string]interface{}{
+				"data":    []string{},
+				"extra":   []string{"not-json", `{"protocol":"dns","unique-id":"ok123","full-id":"ok123.example.com","remote-address":"1.2.3.4"}`},
+				"aes_key": "",
+			}
+			_ = json.NewEncoder(w).Encode(resp)
+		}))
+		t.Cleanup(server.Close)
+
+		parsed, _ := url.Parse(server.URL)
+		client := &Client{
+			serverURL:  parsed,
+			httpClient: newSecureHTTPClient(time.Second),
+		}
+
+		var received []*Interaction
+		err := client.pollInteractions(t.Context(), func(i *Interaction) {
+			received = append(received, i)
+		})
+		require.NoError(t, err)
+		require.Len(t, received, 1)
+		assert.Equal(t, "ok123", received[0].UniqueID)
+	})
+
+	t.Run("skips_invalid_json_in_tlddata", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+			resp := map[string]interface{}{
+				"data":    []string{},
+				"extra":   []string{},
+				"aes_key": "",
+				"tlddata": []string{"not-json", `{"protocol":"dns","unique-id":"tldok","full-id":"tldok.example.com","remote-address":"1.2.3.4"}`},
+			}
+			_ = json.NewEncoder(w).Encode(resp)
+		}))
+		t.Cleanup(server.Close)
+
+		parsed, _ := url.Parse(server.URL)
+		client := &Client{
+			serverURL:  parsed,
+			httpClient: newSecureHTTPClient(time.Second),
+		}
+
+		var received []*Interaction
+		err := client.pollInteractions(t.Context(), func(i *Interaction) {
+			received = append(received, i)
+		})
+		require.NoError(t, err)
+		require.Len(t, received, 1)
+		assert.Equal(t, "tldok", received[0].UniqueID)
+	})
+}
+
 func TestPolling(t *testing.T) {
 	t.Parallel()
 
@@ -990,12 +1192,14 @@ func TestPolling(t *testing.T) {
 			t.Skip("skipping slow test in short mode")
 		}
 
+		var pollCount atomic.Int32
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			switch {
 			case strings.HasSuffix(r.URL.Path, "/register"):
 				w.WriteHeader(http.StatusOK)
 				_, _ = w.Write([]byte(`{"message":"registration successful"}`))
 			case strings.HasSuffix(r.URL.Path, "/poll"):
+				pollCount.Add(1)
 				w.WriteHeader(http.StatusBadRequest)
 				_, _ = w.Write([]byte(`{"error":"could not get correlation-id"}`))
 			case strings.HasSuffix(r.URL.Path, "/deregister"):
@@ -1011,16 +1215,72 @@ func TestPolling(t *testing.T) {
 		require.NoError(t, err)
 		t.Cleanup(func() { _ = client.Close() })
 
-		// Start polling - should handle eviction gracefully (not crash)
 		err = client.StartPolling(50*time.Millisecond, func(*Interaction) {})
 		require.NoError(t, err)
 
-		// Wait for at least one poll cycle
-		time.Sleep(100 * time.Millisecond)
+		require.Eventually(t, func() bool { return pollCount.Load() > 0 }, 2*time.Second, 10*time.Millisecond)
 
-		// Client should still be running
 		assert.True(t, client.IsPolling())
 		require.NoError(t, client.StopPolling())
+	})
+}
+
+func TestPerformRegistration(t *testing.T) {
+	t.Parallel()
+
+	t.Run("error_on_non_ok", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = w.Write([]byte("server overloaded"))
+		}))
+		t.Cleanup(server.Close)
+
+		parsed, _ := url.Parse(server.URL)
+		client := &Client{
+			publicKeyB64: "dGVzdA==",
+			httpClient:   newSecureHTTPClient(time.Second),
+		}
+
+		err := client.performRegistration(t.Context(), parsed)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "registration failed with status 503")
+		assert.Contains(t, err.Error(), "server overloaded")
+	})
+
+	t.Run("returns_error_on_invalid_json", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`not json`))
+		}))
+		t.Cleanup(server.Close)
+
+		parsed, _ := url.Parse(server.URL)
+		client := &Client{
+			publicKeyB64: "dGVzdA==",
+			httpClient:   newSecureHTTPClient(time.Second),
+		}
+
+		err := client.performRegistration(t.Context(), parsed)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to decode registration response")
+	})
+
+	t.Run("returns_error_on_unexpected_message", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"message":"something unexpected"}`))
+		}))
+		t.Cleanup(server.Close)
+
+		parsed, _ := url.Parse(server.URL)
+		client := &Client{
+			publicKeyB64: "dGVzdA==",
+			httpClient:   newSecureHTTPClient(time.Second),
+		}
+
+		err := client.performRegistration(t.Context(), parsed)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "unexpected registration response")
 	})
 }
 
@@ -1051,6 +1311,54 @@ func TestDeregistration(t *testing.T) {
 		require.NoError(t, err)
 
 		assert.True(t, deregisterCalled)
+	})
+
+	t.Run("sends_authorization_token", func(t *testing.T) {
+		var receivedToken string
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			switch {
+			case strings.HasSuffix(r.URL.Path, "/register"):
+				w.WriteHeader(http.StatusOK)
+				_, _ = w.Write([]byte(`{"message":"registration successful"}`))
+			case strings.HasSuffix(r.URL.Path, "/deregister"):
+				receivedToken = r.Header.Get("Authorization")
+				w.WriteHeader(http.StatusOK)
+			}
+		}))
+		t.Cleanup(server.Close)
+
+		client, err := New(t.Context(), Options{
+			ServerURLs:       []string{server.URL},
+			Token:            "dereg-token",
+			DisableKeepAlive: true,
+		})
+		require.NoError(t, err)
+
+		require.NoError(t, client.Close())
+		assert.Equal(t, "dereg-token", receivedToken)
+	})
+
+	t.Run("tolerates_non_ok_status", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			switch {
+			case strings.HasSuffix(r.URL.Path, "/register"):
+				w.WriteHeader(http.StatusOK)
+				_, _ = w.Write([]byte(`{"message":"registration successful"}`))
+			case strings.HasSuffix(r.URL.Path, "/deregister"):
+				w.WriteHeader(http.StatusInternalServerError)
+			}
+		}))
+		t.Cleanup(server.Close)
+
+		client, err := New(t.Context(), Options{
+			ServerURLs:       []string{server.URL},
+			DisableKeepAlive: true,
+		})
+		require.NoError(t, err)
+
+		// Close should still succeed (best-effort deregistration)
+		assert.NoError(t, client.Close())
+		assert.True(t, client.IsClosed())
 	})
 
 	t.Run("deregister_request_format", func(t *testing.T) {
@@ -1111,14 +1419,13 @@ func TestKeepAlive(t *testing.T) {
 		})
 		require.NoError(t, err)
 
-		// Wait for keep-alive to fire
-		time.Sleep(150 * time.Millisecond)
+		// Should have initial registration + at least 1 keep-alive
+		require.Eventually(t, func() bool {
+			return atomic.LoadInt32(&registerCount) >= 2
+		}, 2*time.Second, 10*time.Millisecond)
 
 		err = client.Close()
 		require.NoError(t, err)
-
-		// Should have initial registration + at least 1 keep-alive
-		assert.GreaterOrEqual(t, atomic.LoadInt32(&registerCount), int32(2))
 	})
 
 	t.Run("disabled_when_interval_zero", func(t *testing.T) {
@@ -1145,13 +1452,13 @@ func TestKeepAlive(t *testing.T) {
 		})
 		require.NoError(t, err)
 
-		time.Sleep(100 * time.Millisecond)
+		// Should only have initial registration, no keep-alive re-registrations
+		assert.Never(t, func() bool {
+			return atomic.LoadInt32(&registerCount) > 1
+		}, 150*time.Millisecond, 10*time.Millisecond)
 
 		err = client.Close()
 		require.NoError(t, err)
-
-		// Should only have initial registration
-		assert.Equal(t, int32(1), atomic.LoadInt32(&registerCount))
 	})
 }
 
