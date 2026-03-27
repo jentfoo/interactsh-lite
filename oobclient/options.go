@@ -50,38 +50,43 @@ type Options struct {
 
 	// CorrelationIdLength is the length of the correlation ID preamble.
 	// Must match server configuration exactly. Cannot be customized with default servers.
-	// Minimum: 4 with custom servers. Default: 20
+	// Minimum: 4. Default: 16 for default servers, 20 for user-provided servers.
 	CorrelationIdLength int
 
 	// CorrelationIdNonceLength is the length of the nonce suffix for unique URLs.
 	// Must be >= the server's configured cidn for interactions to be matched.
-	// Minimum: 4. Default: 8
+	// Minimum: 4. Default: 4 for default servers, 13 for user-provided servers.
 	CorrelationIdNonceLength int
 }
 
-// DefaultOptions provides defaults connecting to oastsrv.net servers.
+// DefaultOptions provides protocol-compatible defaults with go-appsec server URLs.
+// CorrelationIdLength and CorrelationIdNonceLength use standard interactsh values
+// safe for any server. When using the default server URLs, the client automatically
+// applies optimized values (see defaultServer* constants).
 var DefaultOptions = Options{
 	ServerURLs:               []string{"oscar.oastsrv.net", "alpha.oastsrv.net", "sierra.oastsrv.net", "tango.oastsrv.net"},
 	HTTPTimeout:              10 * time.Second,
 	KeepAliveInterval:        60 * time.Second,
 	CorrelationIdLength:      20,
-	CorrelationIdNonceLength: 8,
+	CorrelationIdNonceLength: 13,
 }
 
 // fallbackServerURLs are public interactsh servers tried when defaults all fail.
 // Only used when the caller did not explicitly provide ServerURLs.
 var fallbackServerURLs = []string{"oast.pro", "oast.live", "oast.site", "oast.online", "oast.fun", "oast.me"}
 
-// defaultServerCorrelationIdLength is the CorrelationIdLength used by the default go-appsec servers.
-const defaultServerCorrelationIdLength = 16
+// Optimized values for the default go-appsec servers (oastsrv.net).
+// Applied automatically when using DefaultOptions.ServerURLs.
+const (
+	defaultServerCorrelationIdLength = 16
+	defaultServerNonceLength         = 4
+)
 
-// fallbackCorrelationIdLength is the minimum CorrelationIdLength for fallback
-// servers (oast.* use cidl=20).
-const fallbackCorrelationIdLength = 20
-
-// fallbackMinNonceLength is the minimum CorrelationIdNonceLength for fallback
-// servers (oast.* use cidn=13).
-const fallbackMinNonceLength = 13
+// Minimum values required by fallback servers (oast.*).
+const (
+	fallbackCorrelationIdLength = 20
+	fallbackMinNonceLength      = 13
+)
 
 // newSecureHTTPClient creates an HTTP client with secure defaults.
 func newSecureHTTPClient(timeout time.Duration) *http.Client {

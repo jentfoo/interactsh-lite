@@ -95,6 +95,45 @@ func TestIntegration_SessionPersistence(t *testing.T) {
 	verifyHTTPInteraction(t, client2)
 }
 
+func TestIntegration_DefaultServers(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+	t.Parallel()
+
+	// Pure defaults: no ServerURLs, no cidl, no cidn overrides.
+	// Exercises the default oastsrv.net path with cidl=16, cidn=4.
+	client, err := New(t.Context(), Options{
+		DisableKeepAlive: true,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = client.Close() })
+
+	assert.Equal(t, defaultServerNonceLength, client.correlationIDNonceLength)
+	assert.Len(t, client.CorrelationID(), defaultServerCorrelationIdLength)
+
+	verifyHTTPInteraction(t, client)
+}
+
+func TestIntegration_ProjectDiscoveryServers(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+	t.Parallel()
+
+	client, err := New(t.Context(), Options{
+		ServerURLs:       []string{"oast.me", "oast.pro"},
+		DisableKeepAlive: true,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = client.Close() })
+
+	assert.Equal(t, DefaultOptions.CorrelationIdNonceLength, client.correlationIDNonceLength)
+	assert.Len(t, client.CorrelationID(), DefaultOptions.CorrelationIdLength)
+
+	verifyHTTPInteraction(t, client)
+}
+
 func TestIntegration_FullLifecyclePerServer(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test in short mode")

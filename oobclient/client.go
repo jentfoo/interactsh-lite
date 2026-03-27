@@ -130,7 +130,11 @@ func New(ctx context.Context, opts ...Options) (*Client, error) {
 	}
 	correlationIDNonceLength := opt.CorrelationIdNonceLength
 	if correlationIDNonceLength == 0 {
-		correlationIDNonceLength = DefaultOptions.CorrelationIdNonceLength
+		if userProvidedServers {
+			correlationIDNonceLength = DefaultOptions.CorrelationIdNonceLength
+		} else {
+			correlationIDNonceLength = defaultServerNonceLength
+		}
 	}
 
 	if !userProvidedServers {

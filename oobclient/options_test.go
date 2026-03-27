@@ -28,7 +28,7 @@ func TestDefaultOptions(t *testing.T) {
 
 	t.Run("correlation_id_lengths", func(t *testing.T) {
 		assert.Equal(t, 20, DefaultOptions.CorrelationIdLength)
-		assert.Equal(t, 8, DefaultOptions.CorrelationIdNonceLength)
+		assert.Equal(t, 13, DefaultOptions.CorrelationIdNonceLength)
 	})
 }
 
