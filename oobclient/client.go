@@ -865,8 +865,8 @@ func decodePublicKey(data string) (*rsa.PublicKey, error) {
 	return rsaPubKey, nil
 }
 
-// xidEncoding is the base32 alphabet used by xid.
-const xidEncoding = "0123456789abcdefghijklmnopqrstuv"
+// CIDEncodingAlphabet is the base32 alphabet used by the interactsh protocol (and xid).
+const CIDEncodingAlphabet = "0123456789abcdefghijklmnopqrstuv"
 
 // generateCorrelationID creates a base32-encoded ID whose first 4 characters sort
 // with xid timestamps at ~68-minute granularity; remaining characters are random.
@@ -893,9 +893,9 @@ func generateCorrelationID(length int) (string, error) {
 		byteIdx := bitOff / 8
 		bitIdx := bitOff % 8
 		if bitIdx <= 3 {
-			buf[i] = xidEncoding[(raw[byteIdx]>>(3-bitIdx))&0x1F]
+			buf[i] = CIDEncodingAlphabet[(raw[byteIdx]>>(3-bitIdx))&0x1F]
 		} else {
-			buf[i] = xidEncoding[((raw[byteIdx]<<(bitIdx-3))|(raw[byteIdx+1]>>(11-bitIdx)))&0x1F]
+			buf[i] = CIDEncodingAlphabet[((raw[byteIdx]<<(bitIdx-3))|(raw[byteIdx+1]>>(11-bitIdx)))&0x1F]
 		}
 	}
 
@@ -906,7 +906,7 @@ func generateCorrelationID(length int) (string, error) {
 			return "", err
 		}
 		for i, b := range rb {
-			buf[20+i] = xidEncoding[b&0x1F]
+			buf[20+i] = CIDEncodingAlphabet[b&0x1F]
 		}
 	}
 

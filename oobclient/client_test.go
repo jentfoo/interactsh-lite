@@ -72,7 +72,7 @@ func TestGenerateCorrelationID(t *testing.T) {
 		id, err := generateCorrelationID(2000)
 		require.NoError(t, err)
 		for _, c := range id {
-			assert.Contains(t, xidEncoding, string(c))
+			assert.Contains(t, CIDEncodingAlphabet, string(c))
 		}
 	})
 
@@ -89,10 +89,10 @@ func TestGenerateCorrelationID(t *testing.T) {
 	t.Run("timestamp_prefix", func(t *testing.T) {
 		ts := uint32(time.Now().Unix())
 		expected := string([]byte{
-			xidEncoding[(ts>>27)&0x1F],
-			xidEncoding[(ts>>22)&0x1F],
-			xidEncoding[(ts>>17)&0x1F],
-			xidEncoding[(ts>>12)&0x1F],
+			CIDEncodingAlphabet[(ts>>27)&0x1F],
+			CIDEncodingAlphabet[(ts>>22)&0x1F],
+			CIDEncodingAlphabet[(ts>>17)&0x1F],
+			CIDEncodingAlphabet[(ts>>12)&0x1F],
 		})
 		for _, length := range []int{4, 12, 20} {
 			id, err := generateCorrelationID(length)
