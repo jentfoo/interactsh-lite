@@ -16,15 +16,13 @@ A lightweight, dependency-minimal Go module and standalone client for [Interacts
 
 ## Supported Protocols
 
-The client can detect the following out-of-band interaction types:
-
 | Protocol | Description |
 |----------|-------------|
 | DNS | A, AAAA, CNAME, MX, TXT, NS, SOA queries |
 | HTTP/HTTPS | Full request and response capture |
 | SMTP/SMTPS | Email interactions with MAIL FROM capture |
+| FTP/FTPS | FTP file and directory operation capture |
 | LDAP | LDAP search query interactions |
-
 
 ## CLI Tool
 
@@ -71,6 +69,8 @@ interactsh-lite -v
 | `--dns-only` | Display only DNS interactions |
 | `--http-only` | Display only HTTP interactions |
 | `--smtp-only` | Display only SMTP interactions |
+| `--ftp-only` | Display only FTP interactions |
+| `--ldap-only` | Display only LDAP interactions |
 | `-m, --match` | Regex pattern to include interactions |
 | `-f, --filter` | Regex pattern to exclude interactions |
 | `-o, --output` | Output file path |
@@ -228,7 +228,7 @@ url2 := client.Domain()
 // Both share the same correlation ID prefix but have unique nonces.
 ```
 
-### Migration from ProjectDiscovery/Interactsh
+### Migration from ProjectDiscovery/Interactsh Client
 
 This library is a mostly drop-in replacement for the [official Interactsh](https://github.com/projectdiscovery/interactsh) client with a simplified API.
 
