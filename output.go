@@ -120,8 +120,8 @@ func compilePatterns(patterns []string, kind string) ([]*regexp.Regexp, error) {
 }
 
 // shouldDisplay checks protocol filters (OR behavior) and regex patterns.
-func shouldDisplay(i *oobclient.Interaction, dnsOnly, httpOnly, smtpOnly bool, matchRegexes, filterRegexes []*regexp.Regexp) bool {
-	noFilter := !dnsOnly && !httpOnly && !smtpOnly
+func shouldDisplay(i *oobclient.Interaction, dnsOnly, httpOnly, smtpOnly, ftpOnly, ldapOnly bool, matchRegexes, filterRegexes []*regexp.Regexp) bool {
+	noFilter := !dnsOnly && !httpOnly && !smtpOnly && !ftpOnly && !ldapOnly
 
 	// Protocol filters use OR logic: show if no filter set, or if matching filter is set
 	switch strings.ToLower(i.Protocol) {
@@ -137,8 +137,16 @@ func shouldDisplay(i *oobclient.Interaction, dnsOnly, httpOnly, smtpOnly bool, m
 		if !noFilter && !smtpOnly {
 			return false
 		}
+	case "ftp":
+		if !noFilter && !ftpOnly {
+			return false
+		}
+	case "ldap":
+		if !noFilter && !ldapOnly {
+			return false
+		}
 	default:
-		// FTP, LDAP, SMB only show when no protocol filter is active
+		// SMB, responder, etc. only show when no protocol filter is active
 		if !noFilter {
 			return false
 		}

@@ -34,6 +34,8 @@ func main() {
 		dnsOnly          bool
 		httpOnly         bool
 		smtpOnly         bool
+		ftpOnly          bool
+		ldapOnly         bool
 		outputFile       string
 		jsonOutput       bool
 		verbose          bool
@@ -65,6 +67,8 @@ func main() {
 	pflag.BoolVar(&dnsOnly, "dns-only", false, "Display only DNS interactions")
 	pflag.BoolVar(&httpOnly, "http-only", false, "Display only HTTP interactions")
 	pflag.BoolVar(&smtpOnly, "smtp-only", false, "Display only SMTP interactions")
+	pflag.BoolVar(&ftpOnly, "ftp-only", false, "Display only FTP interactions")
+	pflag.BoolVar(&ldapOnly, "ldap-only", false, "Display only LDAP interactions")
 
 	pflag.StringVarP(&outputFile, "output", "o", "", "Output file path")
 	pflag.BoolVar(&jsonOutput, "json", false, "Output in JSON format")
@@ -133,6 +137,12 @@ func main() {
 	}
 	if pflag.Lookup("smtp-only").Changed {
 		cfg.SMTPOnly = smtpOnly
+	}
+	if pflag.Lookup("ftp-only").Changed {
+		cfg.FTPOnly = ftpOnly
+	}
+	if pflag.Lookup("ldap-only").Changed {
+		cfg.LDAPOnly = ldapOnly
 	}
 	if pflag.Lookup("json").Changed {
 		cfg.JSON = jsonOutput
@@ -240,7 +250,7 @@ func main() {
 
 	pollInterval := time.Duration(cfg.PollInterval) * time.Second
 	if err := client.StartPolling(pollInterval, func(i *oobclient.Interaction) {
-		if shouldDisplay(i, cfg.DNSOnly, cfg.HTTPOnly, cfg.SMTPOnly, matchRegexes, filterRegexes) {
+		if shouldDisplay(i, cfg.DNSOnly, cfg.HTTPOnly, cfg.SMTPOnly, cfg.FTPOnly, cfg.LDAPOnly, matchRegexes, filterRegexes) {
 			var fmtErr error
 			if cfg.JSON {
 				fmtErr = formatJSON(output, i)

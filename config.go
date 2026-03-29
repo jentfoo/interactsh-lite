@@ -24,6 +24,8 @@ type Config struct {
 	DNSOnly                  bool          `yaml:"dns-only"`
 	HTTPOnly                 bool          `yaml:"http-only"`
 	SMTPOnly                 bool          `yaml:"smtp-only"`
+	FTPOnly                  bool          `yaml:"ftp-only"`
+	LDAPOnly                 bool          `yaml:"ldap-only"`
 	JSON                     bool          `yaml:"json"`
 	Verbose                  bool          `yaml:"verbose"`
 }

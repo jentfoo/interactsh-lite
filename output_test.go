@@ -154,6 +154,8 @@ func TestShouldDisplay(t *testing.T) {
 		dnsOnly     bool
 		httpOnly    bool
 		smtpOnly    bool
+		ftpOnly     bool
+		ldapOnly    bool
 		expected    bool
 	}{
 		{
@@ -215,11 +217,23 @@ func TestShouldDisplay(t *testing.T) {
 			smtpOnly:    true,
 			expected:    true,
 		},
-		// FTP, LDAP, SMB only show when no filter is active
+		// FTP filter
 		{
 			name:        "no_filter_shows_ftp",
 			interaction: &oobclient.Interaction{Protocol: "ftp"},
 			expected:    true,
+		},
+		{
+			name:        "ftp_only_match",
+			interaction: &oobclient.Interaction{Protocol: "ftp"},
+			ftpOnly:     true,
+			expected:    true,
+		},
+		{
+			name:        "ftp_only_blocks_dns",
+			interaction: &oobclient.Interaction{Protocol: "dns"},
+			ftpOnly:     true,
+			expected:    false,
 		},
 		{
 			name:        "dns_only_blocks_ftp",
@@ -227,17 +241,42 @@ func TestShouldDisplay(t *testing.T) {
 			dnsOnly:     true,
 			expected:    false,
 		},
+		// LDAP filter
 		{
 			name:        "no_filter_shows_ldap",
 			interaction: &oobclient.Interaction{Protocol: "ldap"},
 			expected:    true,
+		},
+		{
+			name:        "ldap_only_match",
+			interaction: &oobclient.Interaction{Protocol: "ldap"},
+			ldapOnly:    true,
+			expected:    true,
+		},
+		{
+			name:        "ldap_only_blocks_http",
+			interaction: &oobclient.Interaction{Protocol: "http"},
+			ldapOnly:    true,
+			expected:    false,
+		},
+		// SMB shows only when no filter active
+		{
+			name:        "no_filter_shows_smb",
+			interaction: &oobclient.Interaction{Protocol: "smb"},
+			expected:    true,
+		},
+		{
+			name:        "ftp_only_blocks_smb",
+			interaction: &oobclient.Interaction{Protocol: "smb"},
+			ftpOnly:     true,
+			expected:    false,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			assert.Equal(t, tt.expected,
-				shouldDisplay(tt.interaction, tt.dnsOnly, tt.httpOnly, tt.smtpOnly, nil, nil))
+				shouldDisplay(tt.interaction, tt.dnsOnly, tt.httpOnly, tt.smtpOnly, tt.ftpOnly, tt.ldapOnly, nil, nil))
 		})
 	}
 }
@@ -336,7 +375,7 @@ func TestShouldDisplay_WithPatterns(t *testing.T) {
 			Protocol: "http",
 			FullId:   "ssrf-test-123",
 		}
-		assert.True(t, shouldDisplay(interaction, false, false, false, matchRegexes, filterRegexes))
+		assert.True(t, shouldDisplay(interaction, false, false, false, false, false, matchRegexes, filterRegexes))
 	})
 
 	t.Run("match_fails", func(t *testing.T) {
@@ -344,7 +383,7 @@ func TestShouldDisplay_WithPatterns(t *testing.T) {
 			Protocol: "http",
 			FullId:   "other-123",
 		}
-		assert.False(t, shouldDisplay(interaction, false, false, false, matchRegexes, filterRegexes))
+		assert.False(t, shouldDisplay(interaction, false, false, false, false, false, matchRegexes, filterRegexes))
 	})
 
 	t.Run("filter_excludes", func(t *testing.T) {
@@ -353,7 +392,7 @@ func TestShouldDisplay_WithPatterns(t *testing.T) {
 			FullId:     "ssrf-test-123",
 			RawRequest: "health-check",
 		}
-		assert.False(t, shouldDisplay(interaction, false, false, false, matchRegexes, filterRegexes))
+		assert.False(t, shouldDisplay(interaction, false, false, false, false, false, matchRegexes, filterRegexes))
 	})
 }
 
