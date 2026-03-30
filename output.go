@@ -129,7 +129,7 @@ func shouldDisplay(i *oobclient.Interaction, dnsOnly, httpOnly, smtpOnly, ftpOnl
 		if !noFilter && !dnsOnly {
 			return false
 		}
-	case "http":
+	case "http", "https":
 		if !noFilter && !httpOnly {
 			return false
 		}

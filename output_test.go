@@ -259,6 +259,19 @@ func TestShouldDisplay(t *testing.T) {
 			ldapOnly:    true,
 			expected:    false,
 		},
+		// HTTPS included with http filter
+		{
+			name:        "http_only_shows_https",
+			interaction: &oobclient.Interaction{Protocol: "https"},
+			httpOnly:    true,
+			expected:    true,
+		},
+		{
+			name:        "dns_only_blocks_https",
+			interaction: &oobclient.Interaction{Protocol: "https"},
+			dnsOnly:     true,
+			expected:    false,
+		},
 		// SMB shows only when no filter active
 		{
 			name:        "no_filter_shows_smb",
