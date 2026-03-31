@@ -1224,7 +1224,6 @@ func TestPolling(t *testing.T) {
 		assert.True(t, client.IsPolling())
 		require.NoError(t, client.StopPolling())
 	})
-
 }
 
 func TestPerformRegistration(t *testing.T) {
@@ -1340,7 +1339,7 @@ func TestDeregistration(t *testing.T) {
 		assert.Equal(t, "dereg-token", receivedToken)
 	})
 
-	t.Run("tolerates_non_ok_status", func(t *testing.T) {
+	t.Run("surfaces_non_ok_status", func(t *testing.T) {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			switch {
 			case strings.HasSuffix(r.URL.Path, "/register"):
@@ -1358,8 +1357,8 @@ func TestDeregistration(t *testing.T) {
 		})
 		require.NoError(t, err)
 
-		// Close should still succeed (best-effort deregistration)
-		assert.NoError(t, client.Close())
+		err = client.Close()
+		require.ErrorContains(t, err, "status 500")
 		assert.True(t, client.IsClosed())
 	})
 

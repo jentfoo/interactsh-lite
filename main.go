@@ -326,7 +326,7 @@ func main() {
 	// All callbacks have completed. displayCount is final
 	switch reason {
 	case "signal":
-		fmt.Println("[INF] Received interrupt, shutting down...")
+		// silent shutdown
 	case "timeout":
 		if cfg.Count > 0 {
 			received := displayCount.Load()

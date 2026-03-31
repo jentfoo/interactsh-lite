@@ -621,10 +621,7 @@ func (c *Client) Close() error {
 	}
 	c.state = stateClosed
 
-	// best-effort deregistration
-	_ = c.performDeregistration()
-
-	return nil
+	return c.performDeregistration()
 }
 
 // performDeregistration sends the deregistration request to the server.
