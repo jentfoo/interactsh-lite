@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -13,25 +14,88 @@ import (
 	"github.com/go-appsec/interactsh-lite/oobclient"
 )
 
-const timestampFormat = "2006-01-02 15:04:05"
+const (
+	ansiReset   = "\033[0m"
+	ansiBold    = "\033[1m"
+	ansiDim     = "\033[2m"
+	ansiBlack   = "\033[30m"
+	ansiRed     = "\033[31m"
+	ansiGreen   = "\033[32m"
+	ansiYellow  = "\033[33m"
+	ansiBlue    = "\033[34m"
+	ansiMagenta = "\033[35m"
+	ansiCyan    = "\033[36m"
+	ansiWhite   = "\033[37m"
+)
+
+// tag prefixes for log messages, plain by default
+var (
+	tagINF   = "[INF]"
+	tagWRN   = "[WRN]"
+	tagERR   = "[ERR]"
+	useColor = false
+)
+
+func isTerminal(f *os.File) bool {
+	fi, err := f.Stat()
+	if err != nil {
+		return false
+	}
+	return fi.Mode()&os.ModeCharDevice != 0
+}
+
+func enableColors() {
+	useColor = true
+	tagINF = "[" + ansiBlue + "INF" + ansiReset + "]"
+	tagWRN = "[" + ansiYellow + "WRN" + ansiReset + "]"
+	tagERR = "[" + ansiRed + "ERR" + ansiReset + "]"
+}
+
+func styleWrap(code, s string) string {
+	if useColor {
+		return code + s + ansiReset
+	}
+	return s
+}
+
+func styleAppend(sb *bytes.Buffer, code, s string) {
+	if useColor {
+		sb.WriteString(code)
+		sb.WriteString(s)
+		sb.WriteString(ansiReset)
+	} else {
+		sb.WriteString(s)
+	}
+}
 
 func formatStandard(w io.Writer, i *oobclient.Interaction, verbose bool) error {
-	protocol := strings.ToUpper(i.Protocol)
-	timestamp := i.Timestamp.Format(timestampFormat)
-	var line string
+	protocol := styleWrap(ansiBold, strings.ToUpper(i.Protocol))
+
+	var b bytes.Buffer
+
+	b.WriteByte('[')
+	styleAppend(&b, ansiCyan, i.FullId)
+	b.WriteString("] ")
+	b.WriteString(protocol)
+
 	switch strings.ToLower(i.Protocol) {
 	case "dns":
-		line = fmt.Sprintf("[%s] Received %s interaction (%s) from %s at %s",
-			i.FullId, protocol, i.QType, i.RemoteAddress, timestamp)
+		b.WriteByte(' ')
+		styleAppend(&b, ansiBold, "("+i.QType+")")
+		b.WriteString(" from ")
+		styleAppend(&b, ansiBold, i.RemoteAddress)
 	case "smb", "responder":
-		line = fmt.Sprintf("[%s] Received %s interaction at %s",
-			i.FullId, protocol, timestamp)
+		// no remote address
 	default:
-		line = fmt.Sprintf("[%s] Received %s interaction from %s at %s",
-			i.FullId, protocol, i.RemoteAddress, timestamp)
+		b.WriteString(" from ")
+		styleAppend(&b, ansiBold, i.RemoteAddress)
 	}
 
-	if _, err := fmt.Fprintln(w, line); err != nil {
+	b.WriteString(" at ")
+	b.WriteString(i.Timestamp.Format(time.DateTime))
+	b.WriteByte('\n')
+
+	if _, err := w.Write(b.Bytes()); err != nil {
 		return err
 	}
 

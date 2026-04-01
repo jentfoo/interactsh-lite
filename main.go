@@ -90,8 +90,13 @@ func main() {
 
 	pflag.Parse()
 
+	if !jsonOutput && outputFile == "" &&
+		isTerminal(os.Stdout) && isTerminal(os.Stderr) && os.Getenv("NO_COLOR") == "" {
+		enableColors()
+	}
+
+	fmt.Printf("%s go-appsec/interactsh-lite version %s\n", tagINF, styleWrap(ansiGreen, oobclient.Version))
 	if showVersion {
-		fmt.Printf("interactsh-lite version %s\n", oobclient.Version)
 		os.Exit(0)
 	}
 
@@ -107,7 +112,7 @@ func main() {
 
 	cfg, err := LoadConfig(configPath)
 	if err != nil {
-		_, _ = fmt.Fprintf(os.Stderr, "[ERR] Could not load config: %v\n", err)
+		_, _ = fmt.Fprintf(os.Stderr, "%s Could not load config: %v\n", tagERR, err)
 		os.Exit(1)
 	}
 
@@ -164,33 +169,33 @@ func main() {
 	}
 
 	if cfg.Timeout < 0 {
-		_, _ = fmt.Fprintf(os.Stderr, "[ERR] --timeout must not be negative\n")
+		_, _ = fmt.Fprintf(os.Stderr, "%s --timeout must not be negative\n", tagERR)
 		os.Exit(1)
 	}
 	if cfg.Count < 0 {
-		_, _ = fmt.Fprintf(os.Stderr, "[ERR] --count must not be negative\n")
+		_, _ = fmt.Fprintf(os.Stderr, "%s --count must not be negative\n", tagERR)
 		os.Exit(1)
 	}
 
 	allMatchPatterns, err := expandPatterns(matchPatterns)
 	if err != nil {
-		_, _ = fmt.Fprintf(os.Stderr, "[ERR] Could not read match patterns: %v\n", err)
+		_, _ = fmt.Fprintf(os.Stderr, "%s Could not read match patterns: %v\n", tagERR, err)
 		os.Exit(1)
 	}
 	allFilterPatterns, err := expandPatterns(filterPatterns)
 	if err != nil {
-		_, _ = fmt.Fprintf(os.Stderr, "[ERR] Could not read filter patterns: %v\n", err)
+		_, _ = fmt.Fprintf(os.Stderr, "%s Could not read filter patterns: %v\n", tagERR, err)
 		os.Exit(1)
 	}
 
 	matchRegexes, err := compilePatterns(allMatchPatterns, "match")
 	if err != nil {
-		_, _ = fmt.Fprintf(os.Stderr, "[ERR] %v\n", err)
+		_, _ = fmt.Fprintf(os.Stderr, "%s %v\n", tagERR, err)
 		os.Exit(1)
 	}
 	filterRegexes, err := compilePatterns(allFilterPatterns, "filter")
 	if err != nil {
-		_, _ = fmt.Fprintf(os.Stderr, "[ERR] %v\n", err)
+		_, _ = fmt.Fprintf(os.Stderr, "%s %v\n", tagERR, err)
 		os.Exit(1)
 	}
 
@@ -200,7 +205,7 @@ func main() {
 	if outputFile != "" {
 		outFile, err = os.Create(outputFile)
 		if err != nil {
-			_, _ = fmt.Fprintf(os.Stderr, "[ERR] Could not open output file: %v\n", err)
+			_, _ = fmt.Fprintf(os.Stderr, "%s Could not open output file: %v\n", tagERR, err)
 			os.Exit(1)
 		}
 		defer func() { _ = outFile.Close() }()
@@ -225,17 +230,17 @@ func main() {
 		if _, statErr := os.Stat(sessionFile); statErr == nil {
 			client, err = oobclient.LoadSession(ctx, sessionFile, opts)
 			if err != nil {
-				_, _ = fmt.Fprintf(os.Stderr, "[ERR] Could not load session: %v\n", err)
+				_, _ = fmt.Fprintf(os.Stderr, "%s Could not load session: %v\n", tagERR, err)
 				os.Exit(1)
 			}
-			fmt.Printf("[INF] Loaded session from %s\n", sessionFile)
+			fmt.Printf("%s Loaded session from %s\n", tagINF, sessionFile)
 		}
 	}
 
 	if client == nil {
 		client, err = oobclient.New(ctx, opts)
 		if err != nil {
-			_, _ = fmt.Fprintf(os.Stderr, "[ERR] Could not create client: %v\n", err)
+			_, _ = fmt.Fprintf(os.Stderr, "%s Could not create client: %v\n", tagERR, err)
 			os.Exit(1)
 		}
 	}
@@ -250,14 +255,14 @@ func main() {
 		payloads[i] = client.Domain()
 	}
 
-	fmt.Printf("[INF] Listing %d payload for OOB Testing\n", payloadCount)
+	fmt.Printf("%s Listing %d payload for OOB Testing\n", tagINF, payloadCount)
 	for _, p := range payloads {
-		fmt.Printf("[INF] %s\n", p)
+		fmt.Printf("%s %s\n", tagINF, p)
 	}
 
 	if payloadStore {
 		if f, createErr := os.Create(payloadStoreFile); createErr != nil {
-			_, _ = fmt.Fprintf(os.Stderr, "[WRN] Could not store payloads: %v\n", createErr)
+			_, _ = fmt.Fprintf(os.Stderr, "%s Could not store payloads: %v\n", tagWRN, createErr)
 		} else {
 			for _, p := range payloads {
 				_, _ = fmt.Fprintln(f, p)
@@ -282,7 +287,7 @@ func main() {
 				fmtErr = formatStandard(output, i, cfg.Verbose)
 			}
 			if fmtErr != nil {
-				_, _ = fmt.Fprintf(os.Stderr, "[WRN] Format error: %v\n", fmtErr)
+				_, _ = fmt.Fprintf(os.Stderr, "%s Format error: %v\n", tagWRN, fmtErr)
 			}
 			if cfg.Count > 0 {
 				if displayCount.Add(1) == int64(cfg.Count) {
@@ -291,7 +296,7 @@ func main() {
 			}
 		}
 	}); err != nil {
-		_, _ = fmt.Fprintf(os.Stderr, "[ERR] Could not start polling: %v\n", err)
+		_, _ = fmt.Fprintf(os.Stderr, "%s Could not start polling: %v\n", tagERR, err)
 		_ = client.Close()
 		os.Exit(1)
 	}
@@ -317,7 +322,7 @@ func main() {
 		_ = client.StopPolling()
 
 		if saveErr := client.SaveSession(sessionFile); saveErr != nil {
-			_, _ = fmt.Fprintf(os.Stderr, "[WRN] Could not save session: %v\n", saveErr)
+			_, _ = fmt.Fprintf(os.Stderr, "%s Could not save session: %v\n", tagWRN, saveErr)
 		}
 	} else {
 		_ = client.Close()
@@ -331,16 +336,16 @@ func main() {
 		if cfg.Count > 0 {
 			received := displayCount.Load()
 			if received >= int64(cfg.Count) {
-				fmt.Printf("[INF] Received %d/%d interactions, shutting down...\n", received, cfg.Count)
+				fmt.Printf("%s Received %d/%d interactions, stopping...\n", tagINF, received, cfg.Count)
 			} else {
-				fmt.Printf("[INF] Timeout reached (%d/%d interactions received), shutting down...\n", received, cfg.Count)
+				fmt.Printf("%s Timeout reached (%d/%d interactions received), stopping...\n", tagINF, received, cfg.Count)
 				exitCode = 1
 			}
 		} else {
-			fmt.Println("[INF] Timeout reached, shutting down...")
+			fmt.Printf("%s Timeout reached, stopping...\n", tagINF)
 		}
 	case "count":
-		fmt.Printf("[INF] Received %d/%d interactions, shutting down...\n", displayCount.Load(), cfg.Count)
+		fmt.Printf("%s Received %d/%d interactions, stopping...\n", tagINF, displayCount.Load(), cfg.Count)
 	}
 
 	if exitCode != 0 {

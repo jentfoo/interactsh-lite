@@ -36,7 +36,8 @@ func TestFormatStandard(t *testing.T) {
 			},
 			contains: []string{
 				"[abc123xyz]",
-				"Received DNS interaction (A)",
+				"DNS",
+				"(A)",
 				"from 172.253.226.100",
 				"at 2021-09-26 12:26:00",
 			},
@@ -51,7 +52,7 @@ func TestFormatStandard(t *testing.T) {
 			},
 			contains: []string{
 				"[http123]",
-				"Received HTTP interaction",
+				"HTTP",
 				"from 43.22.22.50",
 			},
 		},
@@ -64,7 +65,8 @@ func TestFormatStandard(t *testing.T) {
 			},
 			contains: []string{
 				"[smb123]",
-				"Received SMB interaction at",
+				"SMB",
+				"at 2021-09-26 12:26:00",
 			},
 		},
 		{
@@ -76,7 +78,8 @@ func TestFormatStandard(t *testing.T) {
 			},
 			contains: []string{
 				"[resp123]",
-				"Received RESPONDER interaction at",
+				"RESPONDER",
+				"at 2021-09-26 12:26:00",
 			},
 		},
 		{
@@ -428,4 +431,30 @@ func TestVerboseSeparators(t *testing.T) {
 	output := buf.String()
 	assert.Contains(t, output, "-----------\nDNS Request\n-----------")
 	assert.Contains(t, output, "------------\nDNS Response\n------------")
+}
+
+func TestEnableColors(t *testing.T) {
+	// NOT Parallel due to mutation of global useColor state
+
+	origINF, origWRN, origERR := tagINF, tagWRN, tagERR
+	t.Cleanup(func() {
+		tagINF, tagWRN, tagERR = origINF, origWRN, origERR
+	})
+
+	enableColors()
+
+	assert.True(t, useColor)
+	t.Cleanup(func() { useColor = false })
+
+	assert.Contains(t, tagINF, ansiBlue)
+	assert.Contains(t, tagINF, "INF")
+	assert.Contains(t, tagINF, ansiReset)
+
+	assert.Contains(t, tagWRN, ansiYellow)
+	assert.Contains(t, tagWRN, "WRN")
+	assert.Contains(t, tagWRN, ansiReset)
+
+	assert.Contains(t, tagERR, ansiRed)
+	assert.Contains(t, tagERR, "ERR")
+	assert.Contains(t, tagERR, ansiReset)
 }
