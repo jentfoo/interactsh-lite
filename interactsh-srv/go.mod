@@ -3,6 +3,7 @@ module github.com/go-appsec/interactsh-lite/interactsh-srv
 go 1.25.7
 
 require (
+	github.com/akrylysov/pogreb v0.10.2
 	github.com/caddyserver/certmagic v0.25.2
 	github.com/docker/go-units v0.5.0
 	github.com/emersion/go-sasl v0.0.0-20241020182733-b788ff22d5a6
@@ -15,7 +16,6 @@ require (
 	github.com/projectdiscovery/interactsh v1.3.1
 	github.com/spf13/pflag v1.0.10
 	github.com/stretchr/testify v1.11.1
-	github.com/syndtr/goleveldb v1.0.0
 	github.com/vjeantet/ldapserver v1.0.2-0.20260218215457-e117373377c0
 	go.uber.org/zap v1.27.1
 	goftp.io/server/v2 v2.0.2
@@ -32,7 +32,6 @@ require (
 	github.com/Mzack9999/go-http-digest-auth-client v0.6.1-0.20220414142836-eb8883508809 // indirect
 	github.com/STARRY-S/zip v0.2.3 // indirect
 	github.com/VividCortex/ewma v1.2.0 // indirect
-	github.com/akrylysov/pogreb v0.10.2 // indirect
 	github.com/alecthomas/chroma/v2 v2.20.0 // indirect
 	github.com/andybalholm/brotli v1.2.0 // indirect
 	github.com/asaskevich/govalidator v0.0.0-20230301143203-a9d515a09cc2 // indirect
@@ -117,6 +116,7 @@ require (
 	github.com/shoenig/go-m1cpu v0.1.6 // indirect
 	github.com/sorairolake/lzip-go v0.3.8 // indirect
 	github.com/spf13/afero v1.15.0 // indirect
+	github.com/syndtr/goleveldb v1.0.0 // indirect
 	github.com/tidwall/btree v1.8.1 // indirect
 	github.com/tidwall/buntdb v1.3.2 // indirect
 	github.com/tidwall/gjson v1.18.0 // indirect

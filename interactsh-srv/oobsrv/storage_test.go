@@ -14,7 +14,6 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	leveldberrors "github.com/syndtr/goleveldb/leveldb/errors"
 )
 
 func testMemoryStorage(t *testing.T) *memoryStorage {
@@ -298,7 +297,7 @@ var registerTests = []storageTest{
 	},
 	{
 		// Tests that re-registering a CID clears any stale persisted data
-		// (disk: LevelDB, memory: trivially clean).
+		// (disk: pogreb, memory: trivially clean).
 		name: "register/stale_disk_data_cleared",
 		action: func(t *testing.T, s Storage) {
 			t.Helper()
@@ -319,8 +318,9 @@ var registerTests = []storageTest{
 		},
 		assertDisk: func(t *testing.T, ds *diskStorage) {
 			t.Helper()
-			_, err := ds.db.Get([]byte("testcorrelationid001"), nil)
-			assert.ErrorIs(t, err, leveldberrors.ErrNotFound)
+			val, err := ds.db.Get([]byte("testcorrelationid001"))
+			require.NoError(t, err)
+			assert.Nil(t, val)
 		},
 	},
 }
@@ -435,9 +435,10 @@ var getAndClearTests = []storageTest{
 		},
 		assertDisk: func(t *testing.T, ds *diskStorage) {
 			t.Helper()
-			// Pre-clear: LevelDB key exists and is encrypted
-			raw, err := ds.db.Get([]byte("testcorrelationid001"), nil)
+			// Pre-clear: key exists and is encrypted
+			raw, err := ds.db.Get([]byte("testcorrelationid001"))
 			require.NoError(t, err)
+			require.NotNil(t, raw)
 			assert.NotContains(t, string(raw), `"protocol"`)
 		},
 		assert: func(t *testing.T, s Storage) {
@@ -488,9 +489,10 @@ var getAndClearTests = []storageTest{
 		},
 		assertDisk: func(t *testing.T, ds *diskStorage) {
 			t.Helper()
-			// Pre-clear: LevelDB key still exists after wrong-secret attempt
-			raw, err := ds.db.Get([]byte("testcorrelationid001"), nil)
+			// Pre-clear: key still exists after wrong-secret attempt
+			raw, err := ds.db.Get([]byte("testcorrelationid001"))
 			require.NoError(t, err)
+			require.NotNil(t, raw)
 			assert.NotContains(t, string(raw), `"protocol"`)
 		},
 		assert: func(t *testing.T, s Storage) {
@@ -566,9 +568,10 @@ var appendTests = []storageTest{
 		},
 		assertDisk: func(t *testing.T, ds *diskStorage) {
 			t.Helper()
-			// LevelDB key must exist and not contain the plaintext
-			raw, err := ds.db.Get([]byte("testcorrelationid001"), nil)
+			// key must exist and not contain the plaintext
+			raw, err := ds.db.Get([]byte("testcorrelationid001"))
 			require.NoError(t, err)
+			require.NotNil(t, raw)
 			assert.NotContains(t, string(raw), `"protocol"`)
 		},
 		assert: func(t *testing.T, s Storage) {
@@ -1120,7 +1123,7 @@ var evictionTests = []storageTest{
 		},
 	},
 	{
-		name: "eviction/deletes_leveldb_key",
+		name: "eviction/deletes_pogreb_key",
 		action: func(t *testing.T, s Storage) {
 			t.Helper()
 			pubKey := testRSAKey(t)
@@ -1153,9 +1156,10 @@ var evictionTests = []storageTest{
 		},
 		assertDisk: func(t *testing.T, ds *diskStorage) {
 			t.Helper()
-			// LevelDB key deleted by onEvict callback
-			_, err := ds.db.Get([]byte("testcorrelationid001"), nil)
-			require.ErrorIs(t, err, leveldberrors.ErrNotFound)
+			// key deleted by onEvict callback
+			val, err := ds.db.Get([]byte("testcorrelationid001"))
+			require.NoError(t, err)
+			assert.Nil(t, val)
 
 			// Embedded memoryStorage also cleaned up
 			ds.mu.RLock()

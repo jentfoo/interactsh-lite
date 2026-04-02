@@ -21,8 +21,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/syndtr/goleveldb/leveldb"
-	leveldberrors "github.com/syndtr/goleveldb/leveldb/errors"
+	"github.com/akrylysov/pogreb"
 )
 
 // Storage is the interface for session and interaction storage backends.
@@ -101,11 +100,11 @@ type memoryStorage struct {
 	logger *slog.Logger
 
 	// onEvict is called when a session is evicted. Receives the removed
-	// session so diskStorage can lock session.mu before deleting LevelDB keys.
+	// session so diskStorage can lock session.mu before deleting pogreb keys.
 	onEvict func(correlationID string, session *Session)
 
 	// onRegister is called under m.mu write lock before a new session is
-	// added to the map. Used by diskStorage to delete stale LevelDB data.
+	// added to the map. Used by diskStorage to delete stale pogreb data.
 	onRegister func(correlationID string)
 
 	// clock for testable TTL; defaults to time.Now
@@ -523,15 +522,15 @@ func (b *SharedBucket) cleanupStaleLocked(now time.Time) {
 	b.lastCleanup = now
 }
 
-// diskStorage wraps memoryStorage with LevelDB persistence for interactions.
+// diskStorage wraps memoryStorage with pogreb persistence for interactions.
 type diskStorage struct {
 	*memoryStorage
-	db     *leveldb.DB
+	db     *pogreb.DB
 	dbPath string
 	closed atomic.Bool
 }
 
-// NewDiskStorage creates a disk-backed storage with LevelDB.
+// NewDiskStorage creates a disk-backed storage with pogreb.
 func NewDiskStorage(cfg Config, logger *slog.Logger) (*diskStorage, error) {
 	// Random subdirectory per startup
 	randBytes := make([]byte, 8)
@@ -540,9 +539,11 @@ func NewDiskStorage(cfg Config, logger *slog.Logger) (*diskStorage, error) {
 	}
 	dbPath := filepath.Join(cfg.DiskPath, hex.EncodeToString(randBytes))
 
-	db, err := leveldb.OpenFile(dbPath, nil)
+	db, err := pogreb.Open(dbPath, &pogreb.Options{
+		BackgroundCompactionInterval: 5 * time.Minute,
+	})
 	if err != nil {
-		return nil, fmt.Errorf("failed to open LevelDB: %w", err)
+		return nil, fmt.Errorf("failed to open pogreb: %w", err)
 	}
 
 	ms := NewMemoryStorage(cfg, logger)
@@ -553,21 +554,21 @@ func NewDiskStorage(cfg Config, logger *slog.Logger) (*diskStorage, error) {
 		dbPath:        dbPath,
 	}
 
-	// Lock session.mu before deleting LevelDB keys to serialize with
+	// Lock session.mu before deleting pogreb keys to serialize with
 	// any in-flight AppendInteraction that holds the same session pointer.
 	ms.onEvict = func(correlationID string, session *Session) {
 		if session != nil {
 			session.mu.Lock()
 			defer session.mu.Unlock()
 		}
-		_ = db.Delete([]byte(correlationID), nil)
+		_ = db.Delete([]byte(correlationID))
 	}
 
-	// Delete stale LevelDB data before new sessions are added to the map.
+	// Delete stale pogreb data before new sessions are added to the map.
 	// Runs under m.mu write lock so no concurrent AppendInteraction can
 	// be in flight for this correlation ID.
 	ms.onRegister = func(correlationID string) {
-		_ = db.Delete([]byte(correlationID), nil)
+		_ = db.Delete([]byte(correlationID))
 	}
 
 	return ds, nil
@@ -597,18 +598,19 @@ func (d *diskStorage) AppendInteraction(correlationID string, interaction []byte
 	session.mu.Lock()
 	defer session.mu.Unlock()
 
-	// LevelDB read-modify-write under per-session lock
+	// pogreb read-modify-write under per-session lock
 	key := []byte(correlationID)
-	existing, err := d.db.Get(key, nil)
-	if err != nil && !errors.Is(err, leveldberrors.ErrNotFound) {
+	existing, err := d.db.Get(key)
+	if err != nil {
 		return nil // silently discard
 	}
 
 	var prefix [4]byte
 	binary.BigEndian.PutUint32(prefix[:], uint32(len(encrypted)))
-	newValue := append(append(existing, prefix[:]...), encrypted...)
+	newValue := append(existing, prefix[:]...)
+	newValue = append(newValue, encrypted...)
 
-	_ = d.db.Put(key, newValue, nil) // silently discard write errors
+	_ = d.db.Put(key, newValue) // silently discard write errors
 
 	d.logger.Debug("interaction stored (disk)", "correlation-id", correlationID)
 
@@ -618,7 +620,7 @@ func (d *diskStorage) AppendInteraction(correlationID string, interaction []byte
 // diskSessionHandle is the SessionHandle for disk-backed storage.
 type diskSessionHandle struct {
 	session       *Session
-	db            *leveldb.DB
+	db            *pogreb.DB
 	closed        *atomic.Bool
 	correlationID string
 }
@@ -634,16 +636,17 @@ func (h *diskSessionHandle) GetAndClearInteractions() ([][]byte, error) {
 	h.session.mu.Lock()
 
 	key := []byte(h.correlationID)
-	data, err := h.db.Get(key, nil)
+	data, err := h.db.Get(key)
 	if err != nil {
 		h.session.mu.Unlock()
-		if errors.Is(err, leveldberrors.ErrNotFound) {
-			return nil, nil
-		}
 		return nil, fmt.Errorf("could not get interactions: %w", err)
 	}
+	if data == nil {
+		h.session.mu.Unlock()
+		return nil, nil
+	}
 
-	_ = h.db.Delete(key, nil)
+	_ = h.db.Delete(key)
 	h.session.mu.Unlock()
 
 	// parse length-prefixed records [4-byte big-endian length][payload]...
