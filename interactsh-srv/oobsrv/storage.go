@@ -73,6 +73,7 @@ type Session struct {
 	interactions [][]byte
 	lastAccess   atomic.Int64 // UnixNano; atomic for lock-free read/write
 	createdAt    time.Time
+	dirty        bool
 }
 
 // lruEntry holds a correlation ID for the LRU list.
@@ -277,6 +278,7 @@ func (h *memorySessionHandle) PublicKey() *rsa.PublicKey { return h.session.Publ
 func (h *memorySessionHandle) GetAndClearInteractions() ([][]byte, error) {
 	h.session.mu.Lock()
 	defer h.session.mu.Unlock()
+
 	interactions := h.session.interactions
 	h.session.interactions = nil
 	return interactions, nil
@@ -523,6 +525,15 @@ func (b *SharedBucket) cleanupStaleLocked(now time.Time) {
 	b.lastCleanup = now
 }
 
+// diskDrainDelay is how long to wait before flushing in-memory interactions to
+// LevelDB, allowing fast polls to skip disk entirely. Declared as vars so tests
+// can override.
+var diskDrainDelay = 20 * time.Second
+
+// diskDrainThreshold triggers an immediate synchronous flush when the number of
+// buffered interactions for a session exceeds this count.
+var diskDrainThreshold = 20
+
 // diskStorage wraps memoryStorage with LevelDB persistence for interactions.
 type diskStorage struct {
 	*memoryStorage
@@ -594,23 +605,57 @@ func (d *diskStorage) AppendInteraction(correlationID string, interaction []byte
 		d.touchSession(session)
 	}
 
-	session.mu.Lock()
-	defer session.mu.Unlock()
+	drainFunc := func() { // must hold session lock while running
+		defer func() {
+			session.dirty = false
+		}()
 
-	// LevelDB read-modify-write under per-session lock
-	key := []byte(correlationID)
-	existing, err := d.db.Get(key, nil)
-	if err != nil && !errors.Is(err, leveldberrors.ErrNotFound) {
-		return nil // silently discard
+		if len(session.interactions) == 0 {
+			return // sessions were drained in retrieval
+		} else if d.closed.Load() {
+			return // don't attempt to write to closed database
+		}
+
+		interactions := session.interactions
+		session.interactions = nil
+
+		key := []byte(correlationID)
+		value, err := d.db.Get(key, nil)
+		if err != nil && !errors.Is(err, leveldberrors.ErrNotFound) {
+			return // silently discard
+		}
+
+		for _, interaction := range interactions {
+			var prefix [4]byte
+			binary.BigEndian.PutUint32(prefix[:], uint32(len(interaction)))
+			value = append(append(value, prefix[:]...), interaction...)
+		}
+
+		_ = d.db.Put(key, value, nil) // silently discard write errors
+
+		d.logger.Debug("interaction stored (disk)",
+			"correlation-id", correlationID, "count", len(interactions))
 	}
 
-	var prefix [4]byte
-	binary.BigEndian.PutUint32(prefix[:], uint32(len(encrypted)))
-	newValue := append(append(existing, prefix[:]...), encrypted...)
+	var needDrainStart bool
+	session.mu.Lock()
+	session.interactions = append(session.interactions, encrypted)
+	if len(session.interactions) > diskDrainThreshold {
+		drainFunc() // drain immediately while in lock to avoid memory consumption
+	} else {
+		needDrainStart = !session.dirty
+		session.dirty = true
+	}
+	session.mu.Unlock()
 
-	_ = d.db.Put(key, newValue, nil) // silently discard write errors
+	if needDrainStart {
+		time.AfterFunc(diskDrainDelay, func() {
+			session.mu.Lock()
+			defer session.mu.Unlock()
 
-	d.logger.Debug("interaction stored (disk)", "correlation-id", correlationID)
+			drainFunc()
+		})
+	}
 
 	return nil
 }
@@ -632,31 +677,35 @@ func (h *diskSessionHandle) GetAndClearInteractions() ([][]byte, error) {
 	}
 
 	h.session.mu.Lock()
+	defer h.session.mu.Unlock()
 
 	key := []byte(h.correlationID)
 	data, err := h.db.Get(key, nil)
-	if err != nil {
-		h.session.mu.Unlock()
-		if errors.Is(err, leveldberrors.ErrNotFound) {
-			return nil, nil
-		}
+	if err != nil && !errors.Is(err, leveldberrors.ErrNotFound) {
 		return nil, fmt.Errorf("could not get interactions: %w", err)
 	}
 
-	_ = h.db.Delete(key, nil)
-	h.session.mu.Unlock()
-
-	// parse length-prefixed records [4-byte big-endian length][payload]...
 	var interactions [][]byte
-	for off := 0; off+4 <= len(data); {
-		n := int(binary.BigEndian.Uint32(data[off : off+4]))
-		off += 4
-		if off+n > len(data) {
-			break
+	if len(data) > 0 {
+		_ = h.db.Delete(key, nil)
+
+		// parse length-prefixed records [4-byte big-endian length][payload]...
+		for off := 0; off+4 <= len(data); {
+			n := int(binary.BigEndian.Uint32(data[off : off+4]))
+			off += 4
+			if off+n > len(data) {
+				break
+			}
+			interactions = append(interactions, data[off:off+n:off+n])
+			off += n
 		}
-		interactions = append(interactions, data[off:off+n:off+n])
-		off += n
 	}
+
+	if h.session.dirty {
+		interactions = append(interactions, h.session.interactions...)
+		h.session.interactions = nil
+	}
+
 	return interactions, nil
 }
 

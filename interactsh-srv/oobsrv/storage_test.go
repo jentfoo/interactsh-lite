@@ -17,6 +17,10 @@ import (
 	leveldberrors "github.com/syndtr/goleveldb/leveldb/errors"
 )
 
+func init() {
+	diskDrainDelay = 0
+}
+
 func testMemoryStorage(t *testing.T) *memoryStorage {
 	t.Helper()
 
@@ -68,6 +72,22 @@ func decryptTestInteraction(t *testing.T, encrypted []byte, aesKey []byte) strin
 
 // testGetAndClearInteractions wraps GetSession + handle.GetAndClearInteractions
 // into a single call for test convenience.
+// awaitDrain waits for the async disk drain goroutine to flush pending
+// interactions for the given session to LevelDB.
+func awaitDrain(t *testing.T, ds *diskStorage, correlationID string) {
+	t.Helper()
+	ds.mu.RLock()
+	sess := ds.sessions[correlationID]
+	ds.mu.RUnlock()
+	require.NotNil(t, sess)
+	require.Eventually(t, func() bool {
+		sess.mu.Lock()
+		dirty := sess.dirty
+		sess.mu.Unlock()
+		return !dirty
+	}, time.Second, time.Millisecond)
+}
+
 func testGetAndClearInteractions(tb testing.TB, s Storage, correlationID, secretKey string) ([][]byte, error) {
 	tb.Helper()
 
@@ -435,6 +455,7 @@ var getAndClearTests = []storageTest{
 		},
 		assertDisk: func(t *testing.T, ds *diskStorage) {
 			t.Helper()
+			awaitDrain(t, ds, "testcorrelationid001")
 			// Pre-clear: LevelDB key exists and is encrypted
 			raw, err := ds.db.Get([]byte("testcorrelationid001"), nil)
 			require.NoError(t, err)
@@ -488,6 +509,7 @@ var getAndClearTests = []storageTest{
 		},
 		assertDisk: func(t *testing.T, ds *diskStorage) {
 			t.Helper()
+			awaitDrain(t, ds, "testcorrelationid001")
 			// Pre-clear: LevelDB key still exists after wrong-secret attempt
 			raw, err := ds.db.Get([]byte("testcorrelationid001"), nil)
 			require.NoError(t, err)
@@ -566,6 +588,7 @@ var appendTests = []storageTest{
 		},
 		assertDisk: func(t *testing.T, ds *diskStorage) {
 			t.Helper()
+			awaitDrain(t, ds, "testcorrelationid001")
 			// LevelDB key must exist and not contain the plaintext
 			raw, err := ds.db.Get([]byte("testcorrelationid001"), nil)
 			require.NoError(t, err)
