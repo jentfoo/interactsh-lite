@@ -21,8 +21,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/syndtr/goleveldb/leveldb"
-	leveldberrors "github.com/syndtr/goleveldb/leveldb/errors"
+	"go.etcd.io/bbolt"
 )
 
 // Storage is the interface for session and interaction storage backends.
@@ -523,26 +522,41 @@ func (b *SharedBucket) cleanupStaleLocked(now time.Time) {
 	b.lastCleanup = now
 }
 
-// diskStorage wraps memoryStorage with LevelDB persistence for interactions.
+var bucketName = []byte("interactions")
+
+// diskStorage wraps memoryStorage with bbolt persistence for interactions.
 type diskStorage struct {
 	*memoryStorage
-	db     *leveldb.DB
+	db     *bbolt.DB
 	dbPath string
 	closed atomic.Bool
 }
 
-// NewDiskStorage creates a disk-backed storage with LevelDB.
+// NewDiskStorage creates a disk-backed storage with bbolt.
 func NewDiskStorage(cfg Config, logger *slog.Logger) (*diskStorage, error) {
-	// Random subdirectory per startup
+	// Random file per startup
 	randBytes := make([]byte, 8)
 	if _, err := rand.Read(randBytes); err != nil {
 		return nil, fmt.Errorf("failed to generate random path: %w", err)
 	}
-	dbPath := filepath.Join(cfg.DiskPath, hex.EncodeToString(randBytes))
+	dbPath := filepath.Join(cfg.DiskPath, hex.EncodeToString(randBytes)+".db")
 
-	db, err := leveldb.OpenFile(dbPath, nil)
+	if err := os.MkdirAll(cfg.DiskPath, 0700); err != nil {
+		return nil, fmt.Errorf("failed to create storage directory: %w", err)
+	}
+	// NoSync skips fsync on every write-transaction commit. Interaction data
+	// is ephemeral (polled, deleted, TTL-evicted) so crash durability is not
+	// required. Change this if sessions are ever persisted across restarts.
+	db, err := bbolt.Open(dbPath, 0600, &bbolt.Options{NoSync: true})
 	if err != nil {
-		return nil, fmt.Errorf("failed to open LevelDB: %w", err)
+		return nil, fmt.Errorf("failed to open bbolt: %w", err)
+	}
+	if err := db.Update(func(tx *bbolt.Tx) error {
+		_, err := tx.CreateBucketIfNotExists(bucketName)
+		return err
+	}); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("failed to create bucket: %w", err)
 	}
 
 	ms := NewMemoryStorage(cfg, logger)
@@ -553,21 +567,25 @@ func NewDiskStorage(cfg Config, logger *slog.Logger) (*diskStorage, error) {
 		dbPath:        dbPath,
 	}
 
-	// Lock session.mu before deleting LevelDB keys to serialize with
+	// Lock session.mu before deleting bbolt keys to serialize with
 	// any in-flight AppendInteraction that holds the same session pointer.
 	ms.onEvict = func(correlationID string, session *Session) {
 		if session != nil {
 			session.mu.Lock()
 			defer session.mu.Unlock()
 		}
-		_ = db.Delete([]byte(correlationID), nil)
+		_ = db.Update(func(tx *bbolt.Tx) error {
+			return tx.Bucket(bucketName).Delete([]byte(correlationID))
+		})
 	}
 
-	// Delete stale LevelDB data before new sessions are added to the map.
+	// Delete stale bbolt data before new sessions are added to the map.
 	// Runs under m.mu write lock so no concurrent AppendInteraction can
 	// be in flight for this correlation ID.
 	ms.onRegister = func(correlationID string) {
-		_ = db.Delete([]byte(correlationID), nil)
+		_ = db.Update(func(tx *bbolt.Tx) error {
+			return tx.Bucket(bucketName).Delete([]byte(correlationID))
+		})
 	}
 
 	return ds, nil
@@ -597,18 +615,19 @@ func (d *diskStorage) AppendInteraction(correlationID string, interaction []byte
 	session.mu.Lock()
 	defer session.mu.Unlock()
 
-	// LevelDB read-modify-write under per-session lock
-	key := []byte(correlationID)
-	existing, err := d.db.Get(key, nil)
-	if err != nil && !errors.Is(err, leveldberrors.ErrNotFound) {
-		return nil // silently discard
-	}
+	// bbolt read-modify-write under per-session lock
+	_ = d.db.Update(func(tx *bbolt.Tx) error {
+		b := tx.Bucket(bucketName)
+		key := []byte(correlationID)
+		existing := b.Get(key)
 
-	var prefix [4]byte
-	binary.BigEndian.PutUint32(prefix[:], uint32(len(encrypted)))
-	newValue := append(append(existing, prefix[:]...), encrypted...)
+		var prefix [4]byte
+		binary.BigEndian.PutUint32(prefix[:], uint32(len(encrypted)))
+		newValue := append(slices.Clone(existing), prefix[:]...)
+		newValue = append(newValue, encrypted...)
 
-	_ = d.db.Put(key, newValue, nil) // silently discard write errors
+		return b.Put(key, newValue)
+	})
 
 	d.logger.Debug("interaction stored (disk)", "correlation-id", correlationID)
 
@@ -618,7 +637,7 @@ func (d *diskStorage) AppendInteraction(correlationID string, interaction []byte
 // diskSessionHandle is the SessionHandle for disk-backed storage.
 type diskSessionHandle struct {
 	session       *Session
-	db            *leveldb.DB
+	db            *bbolt.DB
 	closed        *atomic.Bool
 	correlationID string
 }
@@ -633,18 +652,20 @@ func (h *diskSessionHandle) GetAndClearInteractions() ([][]byte, error) {
 
 	h.session.mu.Lock()
 
-	key := []byte(h.correlationID)
-	data, err := h.db.Get(key, nil)
-	if err != nil {
-		h.session.mu.Unlock()
-		if errors.Is(err, leveldberrors.ErrNotFound) {
-			return nil, nil
+	var data []byte
+	err := h.db.Update(func(tx *bbolt.Tx) error {
+		b := tx.Bucket(bucketName)
+		key := []byte(h.correlationID)
+		if v := b.Get(key); v != nil {
+			data = slices.Clone(v) // copy out of tx
 		}
+		return b.Delete(key)
+	})
+	h.session.mu.Unlock()
+
+	if err != nil {
 		return nil, fmt.Errorf("could not get interactions: %w", err)
 	}
-
-	_ = h.db.Delete(key, nil)
-	h.session.mu.Unlock()
 
 	// parse length-prefixed records [4-byte big-endian length][payload]...
 	var interactions [][]byte
@@ -678,5 +699,5 @@ func (d *diskStorage) Close() error {
 	if err := d.db.Close(); err != nil {
 		return err
 	}
-	return os.RemoveAll(d.dbPath)
+	return os.Remove(d.dbPath)
 }

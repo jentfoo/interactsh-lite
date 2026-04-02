@@ -14,7 +14,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	leveldberrors "github.com/syndtr/goleveldb/leveldb/errors"
+	bbolt "go.etcd.io/bbolt"
 )
 
 func testMemoryStorage(t *testing.T) *memoryStorage {
@@ -319,8 +319,12 @@ var registerTests = []storageTest{
 		},
 		assertDisk: func(t *testing.T, ds *diskStorage) {
 			t.Helper()
-			_, err := ds.db.Get([]byte("testcorrelationid001"), nil)
-			assert.ErrorIs(t, err, leveldberrors.ErrNotFound)
+			err := ds.db.View(func(tx *bbolt.Tx) error {
+				v := tx.Bucket(bucketName).Get([]byte("testcorrelationid001"))
+				assert.Nil(t, v)
+				return nil
+			})
+			require.NoError(t, err)
 		},
 	},
 }
@@ -435,10 +439,14 @@ var getAndClearTests = []storageTest{
 		},
 		assertDisk: func(t *testing.T, ds *diskStorage) {
 			t.Helper()
-			// Pre-clear: LevelDB key exists and is encrypted
-			raw, err := ds.db.Get([]byte("testcorrelationid001"), nil)
+			// Pre-clear: bbolt key exists and is encrypted
+			err := ds.db.View(func(tx *bbolt.Tx) error {
+				raw := tx.Bucket(bucketName).Get([]byte("testcorrelationid001"))
+				require.NotNil(t, raw)
+				assert.NotContains(t, string(raw), `"protocol"`)
+				return nil
+			})
 			require.NoError(t, err)
-			assert.NotContains(t, string(raw), `"protocol"`)
 		},
 		assert: func(t *testing.T, s Storage) {
 			t.Helper()
@@ -488,10 +496,14 @@ var getAndClearTests = []storageTest{
 		},
 		assertDisk: func(t *testing.T, ds *diskStorage) {
 			t.Helper()
-			// Pre-clear: LevelDB key still exists after wrong-secret attempt
-			raw, err := ds.db.Get([]byte("testcorrelationid001"), nil)
+			// Pre-clear: bbolt key still exists after wrong-secret attempt
+			err := ds.db.View(func(tx *bbolt.Tx) error {
+				raw := tx.Bucket(bucketName).Get([]byte("testcorrelationid001"))
+				require.NotNil(t, raw)
+				assert.NotContains(t, string(raw), `"protocol"`)
+				return nil
+			})
 			require.NoError(t, err)
-			assert.NotContains(t, string(raw), `"protocol"`)
 		},
 		assert: func(t *testing.T, s Storage) {
 			t.Helper()
@@ -566,10 +578,14 @@ var appendTests = []storageTest{
 		},
 		assertDisk: func(t *testing.T, ds *diskStorage) {
 			t.Helper()
-			// LevelDB key must exist and not contain the plaintext
-			raw, err := ds.db.Get([]byte("testcorrelationid001"), nil)
+			// bbolt key must exist and not contain the plaintext
+			err := ds.db.View(func(tx *bbolt.Tx) error {
+				raw := tx.Bucket(bucketName).Get([]byte("testcorrelationid001"))
+				require.NotNil(t, raw)
+				assert.NotContains(t, string(raw), `"protocol"`)
+				return nil
+			})
 			require.NoError(t, err)
-			assert.NotContains(t, string(raw), `"protocol"`)
 		},
 		assert: func(t *testing.T, s Storage) {
 			t.Helper()
@@ -1153,9 +1169,13 @@ var evictionTests = []storageTest{
 		},
 		assertDisk: func(t *testing.T, ds *diskStorage) {
 			t.Helper()
-			// LevelDB key deleted by onEvict callback
-			_, err := ds.db.Get([]byte("testcorrelationid001"), nil)
-			require.ErrorIs(t, err, leveldberrors.ErrNotFound)
+			// bbolt key deleted by onEvict callback
+			err := ds.db.View(func(tx *bbolt.Tx) error {
+				v := tx.Bucket(bucketName).Get([]byte("testcorrelationid001"))
+				assert.Nil(t, v)
+				return nil
+			})
+			require.NoError(t, err)
 
 			// Embedded memoryStorage also cleaned up
 			ds.mu.RLock()

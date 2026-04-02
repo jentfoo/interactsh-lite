@@ -25,7 +25,7 @@ import (
 	"github.com/go-appsec/interactsh-lite/oobclient"
 )
 
-const httpBenchmarkStorageMem = true
+const httpBenchmarkStorageMem = false // TODO - update before commit
 
 // --- HTTP Endpoint Benchmarks ---
 

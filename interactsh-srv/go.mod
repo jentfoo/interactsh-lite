@@ -15,8 +15,8 @@ require (
 	github.com/projectdiscovery/interactsh v1.3.1
 	github.com/spf13/pflag v1.0.10
 	github.com/stretchr/testify v1.11.1
-	github.com/syndtr/goleveldb v1.0.0
 	github.com/vjeantet/ldapserver v1.0.2-0.20260218215457-e117373377c0
+	go.etcd.io/bbolt v1.4.3
 	go.uber.org/zap v1.27.1
 	goftp.io/server/v2 v2.0.2
 	golang.org/x/net v0.50.0
@@ -117,6 +117,7 @@ require (
 	github.com/shoenig/go-m1cpu v0.1.6 // indirect
 	github.com/sorairolake/lzip-go v0.3.8 // indirect
 	github.com/spf13/afero v1.15.0 // indirect
+	github.com/syndtr/goleveldb v1.0.0 // indirect
 	github.com/tidwall/btree v1.8.1 // indirect
 	github.com/tidwall/buntdb v1.3.2 // indirect
 	github.com/tidwall/gjson v1.18.0 // indirect
@@ -138,7 +139,6 @@ require (
 	github.com/zeebo/blake3 v0.2.4 // indirect
 	github.com/zmap/rc2 v0.0.0-20190804163417-abaa70531248 // indirect
 	github.com/zmap/zcrypto v0.0.0-20240803002437-3a861682ac77 // indirect
-	go.etcd.io/bbolt v1.4.3 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	go.uber.org/zap/exp v0.3.0 // indirect
 	go4.org v0.0.0-20230225012048-214862532bf5 // indirect
