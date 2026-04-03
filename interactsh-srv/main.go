@@ -56,6 +56,8 @@ func main() {
 		privkeyFile      string
 		originIPHeader   string
 		maxRequestSize   int
+		rateLimit        int
+		rateLimitWindow  int
 
 		// Config flags
 		configPath          string
@@ -124,6 +126,10 @@ func main() {
 	pflag.StringVar(&originIPHeader, "oih", "", "HTTP header for real client IP")
 	pflag.IntVar(&maxRequestSize, "max-request-size", defaults.MaxRequestSize, "Max request/message size in MB (0=unlimited)")
 	pflag.IntVar(&maxRequestSize, "mrs", defaults.MaxRequestSize, "Max request/message size in MB (0=unlimited)")
+	pflag.IntVar(&rateLimit, "rate-limit", 0, "Max API requests per rate-limit-window per IP (0=disabled)")
+	pflag.IntVar(&rateLimit, "rl", 0, "Max API requests per rate-limit-window per IP (0=disabled)")
+	pflag.IntVar(&rateLimitWindow, "rate-limit-window", defaults.RateLimitWindow, "Rate limit window in seconds")
+	pflag.IntVar(&rateLimitWindow, "rlw", defaults.RateLimitWindow, "Rate limit window in seconds")
 
 	// Config flags
 	pflag.StringVar(&configPath, "config", "", "Config file path")
@@ -250,6 +256,12 @@ func main() {
 	}
 	if flagChanged("max-request-size", "mrs") {
 		cfg.MaxRequestSize = maxRequestSize
+	}
+	if flagChanged("rate-limit", "rl") {
+		cfg.RateLimit = rateLimit
+	}
+	if flagChanged("rate-limit-window", "rlw") {
+		cfg.RateLimitWindow = rateLimitWindow
 	}
 	if flagChanged("resolvers") {
 		cfg.Resolvers = resolvers

@@ -43,6 +43,8 @@ func init() {
 	serverStartIndex = binary.LittleEndian.Uint32(b[:])
 }
 
+const maxRequestAttempts = 4
+
 const rsaKeySize = 2048
 
 type clientState int
@@ -286,42 +288,60 @@ func (c *Client) performRegistration(ctx context.Context, serverURL *url.URL) er
 	}
 
 	regURL := serverURL.String() + "/register"
-	req, err := http.NewRequestWithContext(ctx, "POST", regURL, bytes.NewReader(data))
-	if err != nil {
-		return fmt.Errorf("failed to create request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.ContentLength = int64(len(data))
-	if c.token != "" {
-		req.Header.Set("Authorization", c.token)
-	}
 
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("registration request failed: %w", err)
-	}
-	defer func() {
+	for attempt := range maxRequestAttempts {
+		req, err := http.NewRequestWithContext(ctx, "POST", regURL, bytes.NewReader(data))
+		if err != nil {
+			return fmt.Errorf("failed to create request: %w", err)
+		}
+		req.Header.Set("Content-Type", "application/json")
+		req.ContentLength = int64(len(data))
+		if c.token != "" {
+			req.Header.Set("Authorization", c.token)
+		}
+
+		resp, err := c.httpClient.Do(req)
+		if err != nil {
+			return fmt.Errorf("registration request failed: %w", err)
+		}
+
+		if resp.StatusCode == http.StatusUnauthorized {
+			_, _ = io.Copy(io.Discard, resp.Body)
+			_ = resp.Body.Close()
+			return ErrUnauthorized
+		} else if resp.StatusCode == http.StatusTooManyRequests {
+			delay := parseRetryAfter(resp)
+			_, _ = io.Copy(io.Discard, resp.Body)
+			_ = resp.Body.Close()
+			if attempt < maxRequestAttempts-1 {
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				case <-time.After(delay):
+				}
+			}
+			continue
+		} else if resp.StatusCode != http.StatusOK {
+			body, _ := io.ReadAll(resp.Body)
+			_ = resp.Body.Close()
+			return fmt.Errorf("registration failed with status %d: %s", resp.StatusCode, string(body))
+		}
+
+		var response map[string]interface{}
+		err = json.NewDecoder(resp.Body).Decode(&response)
 		_, _ = io.Copy(io.Discard, resp.Body)
 		_ = resp.Body.Close()
-	}()
+		if err != nil {
+			return fmt.Errorf("failed to decode registration response: %w", err)
+		}
 
-	if resp.StatusCode == http.StatusUnauthorized {
-		return ErrUnauthorized
-	}
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("registration failed with status %d: %s", resp.StatusCode, string(body))
-	}
-
-	var response map[string]interface{}
-	if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
-		return fmt.Errorf("failed to decode registration response: %w", err)
+		if msg, ok := response["message"].(string); !ok || msg != "registration successful" {
+			return fmt.Errorf("unexpected registration response: %v", response)
+		}
+		return nil
 	}
 
-	if msg, ok := response["message"].(string); !ok || msg != "registration successful" {
-		return fmt.Errorf("unexpected registration response: %v", response)
-	}
-	return nil
+	return fmt.Errorf("registration rate limited after %d attempts", maxRequestAttempts)
 }
 
 // startKeepAlive starts a goroutine that periodically re-registers.
@@ -471,8 +491,15 @@ func (c *Client) pollInteractions(ctx context.Context, callback InteractionCallb
 
 	if resp.StatusCode == http.StatusUnauthorized {
 		return ErrUnauthorized
-	}
-	if resp.StatusCode != http.StatusOK {
+	} else if resp.StatusCode == http.StatusTooManyRequests {
+		delay := parseRetryAfter(resp)
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(delay):
+		}
+		return nil
+	} else if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
 		if bytes.Contains(body, []byte("could not get correlation-id")) {
 			return ErrSessionEvicted
@@ -904,6 +931,20 @@ func generateCorrelationID(length int) (string, error) {
 	}
 
 	return string(buf), nil
+}
+
+// parseRetryAfter reads the Retry-After header and returns the delay to wait.
+// Returns header value + 500ms buffer, or 2s default if the header is absent or invalid.
+func parseRetryAfter(resp *http.Response) time.Duration {
+	header := resp.Header.Get("Retry-After")
+	if header == "" {
+		return 2 * time.Second
+	}
+	seconds, err := strconv.Atoi(header)
+	if err != nil || seconds < 0 {
+		return 2 * time.Second
+	}
+	return time.Duration(seconds)*time.Second + 500*time.Millisecond
 }
 
 // generateUUID4 creates a random UUID v4 string.

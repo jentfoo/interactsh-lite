@@ -137,12 +137,22 @@ func New(cfg Config, logger *slog.Logger) (*Server, error) {
 		return h
 	}
 
-	mux.Handle("POST /register", wrapAPI(http.HandlerFunc(s.handleRegister)))
-	mux.Handle("GET /poll", wrapAPI(http.HandlerFunc(s.handlePoll)))
+	// Rate-limited API chain: handler -> auth -> rate limit -> CORS -> response headers
+	rl := newIPRateLimiter(s.cfg.RateLimit, s.cfg.RateLimitWindow)
+	wrapRateLimitedAPI := func(h http.Handler) http.Handler {
+		h = AuthMiddleware(s.cfg.Auth, s.cfg.Token, h)
+		h = RateLimitMiddleware(rl, s.cfg.OriginIPHeader, h)
+		h = CORSMiddleware(s.cfg.ACAOUrl, h)
+		h = ResponseHeadersMiddleware(serverHeader, s.cfg.Version, s.cfg.DisableVersion, true, h)
+		return h
+	}
+
+	mux.Handle("POST /register", wrapRateLimitedAPI(http.HandlerFunc(s.handleRegister)))
+	mux.Handle("GET /poll", wrapRateLimitedAPI(http.HandlerFunc(s.handlePoll)))
 	mux.Handle("POST /deregister", wrapAPI(http.HandlerFunc(s.handleDeregister)))
 
 	if s.cfg.Metrics {
-		mux.Handle("GET /metrics", wrapAPI(http.HandlerFunc(s.handleMetrics)))
+		mux.Handle("GET /metrics", wrapRateLimitedAPI(http.HandlerFunc(s.handleMetrics)))
 	}
 
 	// Default handler (HTTP interaction capture + response routing)

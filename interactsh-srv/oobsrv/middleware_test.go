@@ -1,6 +1,7 @@
 package oobsrv
 
 import (
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -409,5 +410,198 @@ func TestResponseHeadersMiddleware(t *testing.T) {
 		h.ServeHTTP(rec, req)
 
 		assert.Empty(t, rec.Header().Get("X-Content-Type-Options"))
+	})
+}
+
+const testRemoteAddr = "10.0.0.1:1234"
+
+func TestRateLimitMiddleware(t *testing.T) {
+	t.Parallel()
+
+	inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("ok"))
+	})
+
+	t.Run("nil_passthrough", func(t *testing.T) {
+		h := RateLimitMiddleware(nil, "", inner)
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/poll", nil)
+		h.ServeHTTP(rec, req)
+		assert.Equal(t, http.StatusOK, rec.Code)
+		assert.Equal(t, "ok", rec.Body.String())
+	})
+
+	t.Run("allows_within_limit", func(t *testing.T) {
+		rl := newIPRateLimiter(3, 2)
+		h := RateLimitMiddleware(rl, "", inner)
+
+		for i := 0; i < 3; i++ {
+			rec := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodGet, "/poll", nil)
+			req.RemoteAddr = testRemoteAddr
+			h.ServeHTTP(rec, req)
+			assert.Equal(t, http.StatusOK, rec.Code)
+		}
+	})
+
+	t.Run("rejects_over_limit", func(t *testing.T) {
+		rl := newIPRateLimiter(2, 2)
+		h := RateLimitMiddleware(rl, "", inner)
+
+		for i := 0; i < 2; i++ {
+			rec := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodGet, "/poll", nil)
+			req.RemoteAddr = testRemoteAddr
+			h.ServeHTTP(rec, req)
+			require.Equal(t, http.StatusOK, rec.Code)
+		}
+
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/poll", nil)
+		req.RemoteAddr = testRemoteAddr
+		h.ServeHTTP(rec, req)
+
+		assert.Equal(t, http.StatusTooManyRequests, rec.Code)
+		assert.NotEmpty(t, rec.Header().Get("Retry-After"))
+
+		var body map[string]string
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
+		assert.Equal(t, "rate limit exceeded", body["error"])
+	})
+
+	t.Run("window_resets", func(t *testing.T) {
+		clock := time.Now()
+		rl := newIPRateLimiter(1, 1)
+		rl.now = func() time.Time { return clock }
+		h := RateLimitMiddleware(rl, "", inner)
+
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/poll", nil)
+		req.RemoteAddr = testRemoteAddr
+		h.ServeHTTP(rec, req)
+		require.Equal(t, http.StatusOK, rec.Code)
+
+		// Should be rejected
+		rec = httptest.NewRecorder()
+		req = httptest.NewRequest(http.MethodGet, "/poll", nil)
+		req.RemoteAddr = testRemoteAddr
+		h.ServeHTTP(rec, req)
+		require.Equal(t, http.StatusTooManyRequests, rec.Code)
+
+		// Advance past window
+		clock = clock.Add(1100 * time.Millisecond)
+
+		// Should be allowed again
+		rec = httptest.NewRecorder()
+		req = httptest.NewRequest(http.MethodGet, "/poll", nil)
+		req.RemoteAddr = testRemoteAddr
+		h.ServeHTTP(rec, req)
+		assert.Equal(t, http.StatusOK, rec.Code)
+	})
+
+	t.Run("per_ip_isolation", func(t *testing.T) {
+		rl := newIPRateLimiter(1, 2)
+		h := RateLimitMiddleware(rl, "", inner)
+
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/poll", nil)
+		req.RemoteAddr = testRemoteAddr
+		h.ServeHTTP(rec, req)
+		require.Equal(t, http.StatusOK, rec.Code)
+
+		// Same IP rejected
+		rec = httptest.NewRecorder()
+		req = httptest.NewRequest(http.MethodGet, "/poll", nil)
+		req.RemoteAddr = "10.0.0.1:5678"
+		h.ServeHTTP(rec, req)
+		assert.Equal(t, http.StatusTooManyRequests, rec.Code)
+
+		// Different IP allowed
+		rec = httptest.NewRecorder()
+		req = httptest.NewRequest(http.MethodGet, "/poll", nil)
+		req.RemoteAddr = "10.0.0.2:1234"
+		h.ServeHTTP(rec, req)
+		assert.Equal(t, http.StatusOK, rec.Code)
+	})
+
+	t.Run("origin_ip_header", func(t *testing.T) {
+		rl := newIPRateLimiter(1, 2)
+		h := RateLimitMiddleware(rl, "X-Forwarded-For", inner)
+
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/poll", nil)
+		req.RemoteAddr = testRemoteAddr
+		req.Header.Set("X-Forwarded-For", "192.168.1.1")
+		h.ServeHTTP(rec, req)
+		require.Equal(t, http.StatusOK, rec.Code)
+
+		// Same forwarded IP rejected
+		rec = httptest.NewRecorder()
+		req = httptest.NewRequest(http.MethodGet, "/poll", nil)
+		req.RemoteAddr = "10.0.0.2:1234"
+		req.Header.Set("X-Forwarded-For", "192.168.1.1")
+		h.ServeHTTP(rec, req)
+		assert.Equal(t, http.StatusTooManyRequests, rec.Code)
+
+		// Different forwarded IP allowed
+		rec = httptest.NewRecorder()
+		req = httptest.NewRequest(http.MethodGet, "/poll", nil)
+		req.RemoteAddr = testRemoteAddr
+		req.Header.Set("X-Forwarded-For", "192.168.1.2")
+		h.ServeHTTP(rec, req)
+		assert.Equal(t, http.StatusOK, rec.Code)
+	})
+}
+
+func TestIPRateLimiter(t *testing.T) {
+	t.Parallel()
+
+	t.Run("nil_always_allows", func(t *testing.T) {
+		var rl *ipRateLimiter
+		allowed, retryAfter := rl.allow("10.0.0.1")
+		assert.True(t, allowed)
+		assert.Zero(t, retryAfter)
+	})
+
+	t.Run("disabled_when_zero_limit", func(t *testing.T) {
+		rl := newIPRateLimiter(0, 2)
+		assert.Nil(t, rl)
+	})
+
+	t.Run("disabled_when_negative_limit", func(t *testing.T) {
+		rl := newIPRateLimiter(-1, 2)
+		assert.Nil(t, rl)
+	})
+
+	t.Run("returns_positive_retry_after", func(t *testing.T) {
+		rl := newIPRateLimiter(1, 2)
+
+		allowed, _ := rl.allow("10.0.0.1")
+		require.True(t, allowed)
+
+		allowed, retryAfter := rl.allow("10.0.0.1")
+		assert.False(t, allowed)
+		assert.Greater(t, retryAfter, time.Duration(0))
+		assert.LessOrEqual(t, retryAfter, 2*time.Second)
+	})
+
+	t.Run("cleanup_removes_expired", func(t *testing.T) {
+		clock := time.Now()
+		rl := newIPRateLimiter(1, 1)
+		rl.now = func() time.Time { return clock }
+
+		rl.allow("10.0.0.1")
+
+		// Advance past expiry
+		clock = clock.Add(2 * time.Second)
+
+		s := rl.getShard("10.0.0.1")
+		s.mu.Lock()
+		cleanupShard(s, clock)
+		count := len(s.buckets)
+		s.mu.Unlock()
+
+		assert.Zero(t, count)
 	})
 }

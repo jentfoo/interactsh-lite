@@ -34,6 +34,8 @@ type Config struct {
 	PrivKeyFile         string   `yaml:"privkey"`
 	OriginIPHeader      string   `yaml:"origin-ip-header"`
 	MaxRequestSize      int      `yaml:"max-request-size"`
+	RateLimit           int      `yaml:"rate-limit"`
+	RateLimitWindow     int      `yaml:"rate-limit-window"`
 
 	// Config flags
 	Resolvers           []string `yaml:"resolvers"`
@@ -120,6 +122,7 @@ func DefaultConfig() Config {
 		FTPSPort:              990,
 		MaxRequestSize:        100,
 		MaxSharedInteractions: 10_000,
+		RateLimitWindow:       2,
 	}
 }
 
@@ -145,6 +148,9 @@ func (c *Config) Validate() error {
 	}
 	if c.Auth && c.Token == "" {
 		return errors.New("--token is required when authentication is enabled")
+	}
+	if c.RateLimit > 0 && c.RateLimitWindow <= 0 {
+		return fmt.Errorf("rate-limit-window must be > 0 when rate-limit is enabled, got %d", c.RateLimitWindow)
 	}
 	if c.EvictionStrategy != EvictionSliding && c.EvictionStrategy != EvictionFixed {
 		return fmt.Errorf("eviction-strategy must be %q or %q, got %q", EvictionSliding, EvictionFixed, c.EvictionStrategy)

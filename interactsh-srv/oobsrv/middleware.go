@@ -6,10 +6,13 @@ import (
 	"fmt"
 	"io"
 	"maps"
+	"math"
 	"net"
 	"net/http"
 	"net/http/httputil"
+	"strconv"
 	"sync"
+	"time"
 )
 
 // InteractionCallback receives captured HTTP data from logger middleware.
@@ -195,4 +198,119 @@ func ExtractRemoteAddr(r *http.Request, originIPHeader string) string {
 		return r.RemoteAddr
 	}
 	return host
+}
+
+const rateLimitShards = 64
+
+// rateBucket tracks request count and window expiry for a single IP.
+type rateBucket struct {
+	count  int
+	expiry time.Time
+}
+
+// rateShard is one segment of the sharded rate limiter map.
+type rateShard struct {
+	mu       sync.Mutex
+	buckets  map[string]*rateBucket
+	accesses uint64
+}
+
+// ipRateLimiter implements a fixed-window per-IP rate limiter with sharded
+// locks to reduce contention under high concurrency.
+// A nil *ipRateLimiter is valid and always allows requests.
+type ipRateLimiter struct {
+	shards [rateLimitShards]rateShard
+	limit  int
+	window time.Duration
+	now    func() time.Time // injectable for testing
+}
+
+// newIPRateLimiter creates a rate limiter. Returns nil when limit <= 0 (disabled).
+func newIPRateLimiter(limit, windowSeconds int) *ipRateLimiter {
+	if limit <= 0 {
+		return nil
+	}
+	rl := &ipRateLimiter{
+		limit:  limit,
+		window: time.Duration(windowSeconds) * time.Second,
+		now:    time.Now,
+	}
+	for i := range rl.shards {
+		rl.shards[i].buckets = make(map[string]*rateBucket)
+	}
+	return rl
+}
+
+// getShard returns the shard for the given IP using inline FNV-1a.
+func (rl *ipRateLimiter) getShard(ip string) *rateShard {
+	var h uint32 = 2166136261 // FNV-1a offset basis
+	for i := 0; i < len(ip); i++ {
+		h ^= uint32(ip[i])
+		h *= 16777619 // FNV-1a prime
+	}
+	return &rl.shards[h&(rateLimitShards-1)]
+}
+
+// allow checks whether ip is within the rate limit.
+// Returns (allowed, retryAfter). On a nil receiver, always returns (true, 0).
+func (rl *ipRateLimiter) allow(ip string) (bool, time.Duration) {
+	if rl == nil {
+		return true, 0
+	}
+
+	now := rl.now()
+	s := rl.getShard(ip)
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.accesses++
+	if s.accesses%16 == 0 {
+		cleanupShard(s, now)
+	}
+
+	b, ok := s.buckets[ip]
+	if !ok || now.After(b.expiry) {
+		s.buckets[ip] = &rateBucket{count: 1, expiry: now.Add(rl.window)}
+		return true, 0
+	}
+
+	if b.count < rl.limit {
+		b.count++
+		return true, 0
+	}
+
+	return false, b.expiry.Sub(now)
+}
+
+// cleanupShard removes expired entries from a single shard. Must be called with s.mu held.
+func cleanupShard(s *rateShard, now time.Time) {
+	for ip, b := range s.buckets {
+		if now.After(b.expiry) {
+			delete(s.buckets, ip)
+		}
+	}
+}
+
+// RateLimitMiddleware rejects requests exceeding the per-IP rate limit with 429.
+// When rl is nil, returns next directly (zero overhead when disabled).
+func RateLimitMiddleware(rl *ipRateLimiter, originIPHeader string, next http.Handler) http.Handler {
+	if rl == nil {
+		return next
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ip := ExtractRemoteAddr(r, originIPHeader)
+		allowed, retryAfter := rl.allow(ip)
+		if !allowed {
+			seconds := int(math.Ceil(retryAfter.Seconds()))
+			if seconds < 1 {
+				seconds = 1
+			}
+			w.Header().Set("Retry-After", strconv.Itoa(seconds))
+			w.WriteHeader(http.StatusTooManyRequests)
+			_, _ = w.Write([]byte(`{"error":"rate limit exceeded"}`))
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
