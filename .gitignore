@@ -4,6 +4,7 @@ bin/
 # Test output
 test.out
 *.out
+*.test
 
 # IDE
 .idea/

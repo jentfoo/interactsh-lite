@@ -3,16 +3,16 @@
 [![license](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/go-appsec/interactsh-lite/blob/main/LICENSE)
 [![Build Status](https://github.com/go-appsec/interactsh-lite/actions/workflows/tests-main.yml/badge.svg)](https://github.com/go-appsec/interactsh-lite/actions/workflows/tests-main.yml)
 
-A lightweight, dependency-minimal Go module and standalone client for [Interactsh](https://github.com/projectdiscovery/interactsh) servers. This tool provides out-of-band (OOB / OAST) interaction detection for security testing with a clean, simple API.
+A lightweight, dependency-minimal Go project for [Interactsh](https://github.com/projectdiscovery/interactsh) out-of-band (OOB/OAST) interaction detection. Provides a client library, standalone CLI client, and a lightweight interaction capture server, all with minimal dependencies and clean APIs.
 
 ## Features
 
-- Minimal dependencies for minimal size
+- Minimal dependencies with small binaries (client under 10MB, server under 20MB)
 - Context-aware API for cancellation and timeouts
 - Thread-safe client with clear state machine
 - Session persistence for long-running tests
-- Compatible with public Interactsh servers and self-hosted instances
-- Standalone CLI tool (`interactsh-lite`)
+- Cross-compatible: the go-appsec/interactsh-lite client works with ProjectDiscovery's public servers and the go-appsec/interactsh-lite server; the go-appsec/interactsh-lite server works with both this project's client and ProjectDiscovery's official `interactsh-client`
+- Standalone CLI client (installed as `interactsh-lite`) and server (installed as `interactsh-srv`)
 
 ## Supported Protocols
 
@@ -26,7 +26,7 @@ A lightweight, dependency-minimal Go module and standalone client for [Interacts
 
 ## CLI Tool
 
-Download the binary for your platform from the [latest release](https://github.com/go-appsec/interactsh-lite/releases), or by using `go install`:
+Download the client binary for your platform from the [latest release](https://github.com/go-appsec/interactsh-lite/releases), or install with `go install`:
 
 ```bash
 go install github.com/go-appsec/interactsh-lite@latest
@@ -324,6 +324,228 @@ The `Interaction` struct fields are identical.
 | `ErrClientClosed` | Operation attempted on a closed client |
 | `ErrAlreadyPolling` | StartPolling called while already polling |
 | `ErrNotPolling` | StopPolling called while not polling |
+
+## Server
+
+The go-appsec/interactsh-lite server is a lightweight, self-hosted OOB interaction capture server, installed as `interactsh-srv`. It is API-compatible with [ProjectDiscovery/interactsh](https://github.com/projectdiscovery/interactsh). The server is a separate Go module so the client library stays dependency-minimal.
+
+### Why go-appsec/interactsh-lite Server
+
+The primary motivation is flexibility in how OAST domains can be structured. The reference implementation enforces specific correlation ID and nonce formats tied to the xid library. The go-appsec/interactsh-lite server decouples these: the nonce is fully controlled by the client, and the server accepts the correlation ID and nonce split or combined. This enables shorter, more memorable domain formats, including formats that are friendlier for LLM recall and usage.
+
+Key improvements:
+
+- **Flexible correlation IDs.** Accepts any alphanumeric correlation ID meeting the minimum length. Not xid-based, so no host identity is leaked in payload URLs sent to third-party targets. Supports shorter IDs without collision risk since xid ordering is not assumed.
+- **No nonce length requirement.** The reference server hardcodes a minimum nonce length of 3. The go-appsec/interactsh-lite server accepts any nonce length, allowing clients full control over domain structure.
+- **Flexible domain formats.** Because the nonce can be split out, combined, or structured differently, clients can generate domains in formats optimized for their use case (e.g., shorter URLs, LLM-friendly patterns).
+- **Metrics and correctness fixes.** Fixes session count tracking, corrects metrics field spelling (`heap_allo` to `heap_alloc`, `head_idle` to `heap_idle`), and properly handles keep-alive re-registration.
+- **Request size limits.** Adds `--max-request-size` to cap HTTP request body size across all endpoints, protecting against oversized payloads.
+- **Defense in depth.** Interactions are encrypted at capture time rather than at poll time, reducing the window where plaintext data exists in memory. Short correlation IDs that cannot be matched are rejected at registration rather than silently accepted.
+
+### Installation
+
+```bash
+go install github.com/go-appsec/interactsh-lite/interactsh-srv@latest
+```
+
+Or download the binary for your platform from the [latest release](https://github.com/go-appsec/interactsh-lite/releases).
+
+### Prerequisites
+
+Running a self-hosted interactsh server requires:
+
+1. **A domain name** with nameservers pointing to your server's IP address.
+2. **A server** (VPS or cloud VM) with a public IP address, running 24/7.
+
+#### Domain and Nameserver Setup
+
+Configure your domain registrar to delegate DNS to your server:
+
+1. **Create glue records**: Add hostname entries `ns1.yourdomain.com` and `ns2.yourdomain.com` both pointing to your server's public IP.
+2. **Set nameservers**: Change the domain's nameservers to `ns1.yourdomain.com` and `ns2.yourdomain.com`.
+
+The exact steps vary by registrar. For example, on GoDaddy:
+- Navigate to Domain Settings > Hostnames > Add `ns1` and `ns2` with your server IP.
+- Navigate to DNS Management > Nameservers > "I'll use my own nameservers" > Enter `ns1.yourdomain.com` and `ns2.yourdomain.com`.
+
+> **Note:** On cloud VMs (AWS EC2, GCP, Azure, etc.), update security groups or firewall rules to allow inbound traffic on the required ports (53, 80, 443, 25, 587, 465, 389, and optionally 21/990 for FTP).
+
+### Basic Usage
+
+Once DNS is configured, start the server:
+
+```bash
+interactsh-srv --domain yourdomain.com
+```
+
+The server auto-detects its public IP and provisions TLS certificates via ACME (Let's Encrypt). All core services (DNS, HTTP, HTTPS, SMTP, LDAP) start automatically.
+
+### Server CLI Flags
+
+```
+INPUT:
+  -d, --domain strings                 Configured domain(s) (required, comma-separated)
+  -i, --ip strings                     Public IP address(es) (auto-detected if omitted)
+      --listen-ip, --lip string        Bind address for all listeners (default "0.0.0.0")
+  -e, --eviction int                   Eviction TTL in days (default 30)
+      --no-eviction, --ne              Disable TTL-based eviction
+      --eviction-strategy, --es string Eviction strategy: sliding or fixed (default "sliding")
+  -a, --auth                           Enable authentication (auto-generates token if --token not set)
+  -t, --token string                   Authentication token
+      --acao-url string                CORS Access-Control-Allow-Origin value (default "*")
+      --skip-acme, --sa                Skip ACME certificate generation
+      --scan-everywhere, --se          Scan entire request for correlation IDs
+      --correlation-id-length, --cidl  Correlation ID length (default 20, min 3)
+      --cert string                    Custom TLS certificate file path
+      --privkey string                 Custom TLS private key file path
+      --origin-ip-header, --oih string HTTP header for real client IP (behind reverse proxy)
+      --max-request-size, --mrs int    Max HTTP request body in MB, 0=unlimited (default 0)
+
+CONFIG:
+      --config string                  Config file path (default "~/.config/interactsh-server/config.yaml")
+  -r, --resolvers strings              DNS resolvers for ACME (file path or comma-separated)
+      --dynamic-resp, --dr             Enable dynamic HTTP responses
+      --custom-records, --cr string    Custom DNS records YAML file
+      --http-index, --hi string        Custom HTML index file
+      --http-directory, --hd string    Static file directory served at /s/
+      --default-http-response, --dhr   File served for all HTTP requests (highest priority)
+      --disk, --ds                     Enable disk-backed storage (LevelDB)
+      --disk-path, --dsp string        Disk storage directory (required with --disk)
+      --server-header, --csh string    Custom Server header value
+      --disable-version, --dv          Suppress X-Interactsh-Version response header
+
+SERVICES:
+      --dns-port int                   DNS server port (default 53)
+      --http-port int                  HTTP server port (default 80)
+      --https-port int                 HTTPS server port (default 443)
+      --smtp-port int                  SMTP server port (default 25)
+      --smtps-port int                 SMTPS server port (default 587)
+      --smtp-autotls-port int          SMTP implicit TLS port (default 465)
+      --ldap-port int                  LDAP server port (default 389)
+      --ldap                           Enable LDAP full logging (requires auth)
+      --wildcard, --wc                 Enable root TLD capture (requires auth)
+      --ftp                            Enable FTP service (requires auth)
+      --ftp-port int                   FTP server port (default 21)
+      --ftps-port int                  FTPS server port (default 990)
+      --ftp-dir string                 FTP root directory (temporary if not specified)
+
+DEBUG:
+      --version                        Print version and exit
+      --debug                          Enable debug logging
+  -v, --verbose                        Verbose interaction logging
+      --enable-pprof, --ep             Enable pprof on 127.0.0.1:8086
+      --health-check, --hc             Run diagnostics and exit
+      --metrics                        Enable /metrics endpoint
+      --disable-update-check, --duc    No-op, accepted for compatibility
+```
+
+### Server Configuration File
+
+Create `~/.config/interactsh-server/config.yaml`. All options are shown below with their defaults:
+
+```yaml
+# Input
+domain: "yourdomain.com"
+# ip: "1.2.3.4"
+listen-ip: "0.0.0.0"
+eviction: 30
+no-eviction: false
+eviction-strategy: "sliding"
+auth: false
+token: ""
+acao-url: "*"
+skip-acme: false
+scan-everywhere: false
+correlation-id-length: 20
+cert: ""
+privkey: ""
+origin-ip-header: ""
+max-request-size: 0
+
+# Config
+resolvers: []
+dynamic-resp: false
+custom-records: ""
+http-index: ""
+http-directory: ""
+default-http-response: ""
+disk: false
+disk-path: ""
+server-header: ""
+disable-version: false
+
+# Services
+dns-port: 53
+http-port: 80
+https-port: 443
+smtp-port: 25
+smtps-port: 587
+smtp-autotls-port: 465
+ldap-port: 389
+ldap: false
+wildcard: false
+ftp: false
+ftp-port: 21
+ftps-port: 990
+ftp-dir: ""
+
+# Debug
+debug: false
+enable-pprof: false
+metrics: false
+```
+
+CLI flags override config file values. Use `--config-update` to write the merged configuration (CLI flags + config file defaults) to disk:
+
+```bash
+interactsh-srv --domain oast.example.com --auth --metrics --config-update
+```
+
+### Server Examples
+
+```bash
+# Basic single-domain server
+interactsh-srv --domain oast.example.com
+
+# With authentication
+interactsh-srv --domain oast.example.com --token my-secret-token
+
+# Enable FTP, LDAP logging, and wildcard capture (all require auth)
+interactsh-srv --domain oast.example.com --token my-secret --ftp --ldap --wildcard
+
+# Disk-backed storage for persistence across restarts
+interactsh-srv --domain oast.example.com --disk --disk-path /var/lib/interactsh
+
+# Custom TLS certificates
+interactsh-srv --domain oast.example.com --cert /path/to/cert.pem --privkey /path/to/key.pem
+
+# Behind a reverse proxy (handle TLS externally)
+interactsh-srv --domain oast.example.com --origin-ip-header X-Forwarded-For --skip-acme
+
+# Run health check diagnostics
+interactsh-srv --health-check
+```
+
+### Migrating from ProjectDiscovery/interactsh Server
+
+The go-appsec/interactsh-lite server is a drop-in replacement for ProjectDiscovery's `interactsh-server`. The API, wire protocol, and cryptographic model are identical.
+
+#### CLI Flag Changes
+
+- All flags use `--` prefix format (`--config` instead of `-config`, `--debug` instead of `-debug`)
+- `--debug` and `--verbose` both control the same log level (no behavioral difference)
+- `--correlation-id-nonce-length` / `--cidn` is accepted but deprecated and ignored (nonce length is now fully client-controlled)
+- `--disable-update-check` / `--duc` is accepted as a no-op for compatibility
+- Added `--max-request-size` / `--mrs` to limit HTTP request body size
+- Added `--config-update` to write merged config to disk and exit
+
+#### Not Supported
+
+The following features from ProjectDiscovery/interactsh are not included. Use [ProjectDiscovery/interactsh](https://github.com/projectdiscovery/interactsh) if these are required.
+
+- SMB interaction capture (`--smb`)
+- Responder agent (`--responder`)
+- Built-in update checking (`--update`)
 
 ## Terms of Service
 

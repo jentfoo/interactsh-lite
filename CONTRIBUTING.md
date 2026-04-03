@@ -10,21 +10,33 @@ Thank you for your interest in contributing to go-appsec/interactsh-lite!
 git clone https://github.com/YOUR_USERNAME/interactsh-lite
 cd interactsh-lite
 
-# Install dependencies
+# Install dependencies for both modules
 go mod download
+cd interactsh-srv && go mod download && cd ..
 
 # Verify your setup
 make test-all
 ```
 
+## Project Structure
+
+This is a multi-module Go repository:
+
+- **Root module** (`github.com/go-appsec/interactsh-lite`): Client library (`oobclient/`) and client CLI.
+- **Server module** (`github.com/go-appsec/interactsh-lite/interactsh-srv`): Server library (`oobsrv/`) and server CLI.
+
+Changes to shared types (e.g., `oobclient.Interaction`) require a client module release before the server module can adopt them.
+
 ## Development Workflow
 
 **Available Commands:**
 ```bash
+make build       # Build both binaries into bin/
 make test        # Run fast tests
-make test-all    # Run tests, including network + integration, with race detection and coverage
+make test-all    # Run all tests with race detection and coverage
 make test-cover  # Generate HTML coverage report
 make lint        # Run linting and static analysis
+make bench       # Run benchmarks
 ```
 
 ## Pull Requests

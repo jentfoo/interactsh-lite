@@ -16,7 +16,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
-          go-version-file: go.mod
+          go-version-file: interactsh-srv/go.mod
 
       - name: Set up golangci-lint
         run: |
@@ -28,8 +28,43 @@ jobs:
       - name: Run tidy check
         run: |
           go mod tidy
-          # Fail if go.mod or go.sum changed
-          git diff --exit-code go.mod go.sum
+          git diff --exit-code -- go.mod go.sum
+          cd interactsh-srv && go mod tidy
+          git diff --exit-code -- interactsh-srv/go.mod interactsh-srv/go.sum
+
+  build:
+    name: Verify Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: interactsh-srv/go.mod
+
+      - name: Build binaries
+        run: make build
+
+      - name: Verify interactsh-lite size
+        run: |
+          size=$(stat --format=%s bin/interactsh-lite)
+          max=$((10 * 1000 * 1000))
+          echo "interactsh-lite size: $((size / 1000 / 1000))MB ($size bytes)"
+          if [ "$size" -gt "$max" ]; then
+            echo "ERROR: interactsh-lite exceeds 10MB limit"
+            exit 1
+          fi
+
+      - name: Verify interactsh-srv size
+        run: |
+          size=$(stat --format=%s bin/interactsh-srv)
+          max=$((20 * 1000 * 1000))
+          echo "interactsh-srv size: $((size / 1000 / 1000))MB ($size bytes)"
+          if [ "$size" -gt "$max" ]; then
+            echo "ERROR: interactsh-srv exceeds 20MB limit"
+            exit 1
+          fi
 
   test:
     name: Verify Unit Tests
@@ -39,7 +74,6 @@ jobs:
         go:
         - '1.26'
         - '1.25'
-        - '1.24'
     steps:
       - uses: actions/checkout@v6
 
@@ -50,4 +84,3 @@ jobs:
 
       - name: Run unit tests
         run: make test
-
