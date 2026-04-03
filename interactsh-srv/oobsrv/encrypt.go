@@ -11,6 +11,9 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"io"
+
+	"golang.org/x/crypto/hkdf"
 )
 
 // ParsePublicKey decodes a base64-encoded PEM-wrapped PKIX RSA public key.
@@ -38,11 +41,14 @@ func ParsePublicKey(b64Key string) (*rsa.PublicKey, error) {
 	return rsaPubKey, nil
 }
 
-// GenerateAESKey returns 32 random bytes for AES-256.
-func GenerateAESKey() ([]byte, error) {
+// DeriveSessionAESKey deterministically derives a 32-byte AES-256 key from
+// the correlation ID and secret key using HKDF-SHA256. The same inputs
+// always produce the same key, enabling re-derivation after server restart.
+func DeriveSessionAESKey(correlationID, secretKey string) ([]byte, error) {
+	r := hkdf.New(sha256.New, []byte(secretKey), []byte(correlationID), []byte("interactsh-session"))
 	key := make([]byte, 32)
-	if _, err := rand.Read(key); err != nil {
-		return nil, fmt.Errorf("failed to generate AES key: %w", err)
+	if _, err := io.ReadFull(r, key); err != nil {
+		return nil, fmt.Errorf("failed to derive AES key: %w", err)
 	}
 	return key, nil
 }

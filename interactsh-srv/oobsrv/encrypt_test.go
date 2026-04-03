@@ -11,6 +11,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
+	"fmt"
 	"testing"
 	"time"
 
@@ -97,19 +98,39 @@ func TestParsePublicKey(t *testing.T) {
 	})
 }
 
-func TestGenerateAESKey(t *testing.T) {
+// generateAESKey returns 32 random bytes for AES-256.
+func generateAESKey() ([]byte, error) {
+	key := make([]byte, 32)
+	if _, err := rand.Read(key); err != nil {
+		return nil, fmt.Errorf("failed to generate AES key: %w", err)
+	}
+	return key, nil
+}
+
+func TestDeriveSessionAESKey(t *testing.T) {
 	t.Parallel()
 
-	t.Run("correct_length", func(t *testing.T) {
-		key, err := GenerateAESKey()
+	t.Run("deterministic", func(t *testing.T) {
+		key1, err := DeriveSessionAESKey("correlationid123456", "secret-key-abc")
 		require.NoError(t, err)
-		assert.Len(t, key, 32)
+		key2, err := DeriveSessionAESKey("correlationid123456", "secret-key-abc")
+		require.NoError(t, err)
+		assert.Equal(t, key1, key2)
+		assert.Len(t, key1, 32)
 	})
 
-	t.Run("unique_values", func(t *testing.T) {
-		key1, err := GenerateAESKey()
+	t.Run("different_correlation_id", func(t *testing.T) {
+		key1, err := DeriveSessionAESKey("correlationid123456", "secret-key-abc")
 		require.NoError(t, err)
-		key2, err := GenerateAESKey()
+		key2, err := DeriveSessionAESKey("differentcorrelation", "secret-key-abc")
+		require.NoError(t, err)
+		assert.NotEqual(t, key1, key2)
+	})
+
+	t.Run("different_secret_key", func(t *testing.T) {
+		key1, err := DeriveSessionAESKey("correlationid123456", "secret-key-abc")
+		require.NoError(t, err)
+		key2, err := DeriveSessionAESKey("correlationid123456", "secret-key-xyz")
 		require.NoError(t, err)
 		assert.NotEqual(t, key1, key2)
 	})
@@ -118,7 +139,7 @@ func TestGenerateAESKey(t *testing.T) {
 func TestEncryptInteraction(t *testing.T) {
 	t.Parallel()
 
-	aesKey, err := GenerateAESKey()
+	aesKey, err := generateAESKey()
 	require.NoError(t, err)
 
 	t.Run("round_trip_raw_crypto", func(t *testing.T) {
@@ -190,7 +211,7 @@ func TestEncryptAESKey(t *testing.T) {
 	require.NoError(t, err)
 
 	t.Run("round_trip_with_private_key", func(t *testing.T) {
-		aesKey, err := GenerateAESKey()
+		aesKey, err := generateAESKey()
 		require.NoError(t, err)
 
 		encrypted, err := EncryptAESKey(aesKey, &key.PublicKey)

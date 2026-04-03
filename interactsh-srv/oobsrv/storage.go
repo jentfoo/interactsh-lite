@@ -236,9 +236,9 @@ func (m *memoryStorage) registerInternal(_ context.Context, correlationID string
 		m.evictLRU() // Evict if at capacity
 	}
 
-	aesKey, err := GenerateAESKey()
+	aesKey, err := DeriveSessionAESKey(correlationID, secretKey)
 	if err != nil {
-		return nil, false, fmt.Errorf("failed to generate AES key: %w", err)
+		return nil, false, fmt.Errorf("failed to derive AES key: %w", err)
 	}
 	aesBlock, err := aes.NewCipher(aesKey)
 	if err != nil {
@@ -524,25 +524,40 @@ func (b *SharedBucket) cleanupStaleLocked(now time.Time) {
 }
 
 // diskStorage wraps memoryStorage with LevelDB persistence for interactions.
+// In persistent mode (--disk-persist), data survives restarts: HKDF-derived
+// keys allow clients to resume sessions after re-registration. In ephemeral
+// mode (--disk), a random subdirectory is used and removed on close.
 type diskStorage struct {
 	*memoryStorage
-	db     *leveldb.DB
-	dbPath string
-	closed atomic.Bool
+	db         *leveldb.DB
+	dbPath     string
+	persistent bool
+	closed     atomic.Bool
 }
 
 // NewDiskStorage creates a disk-backed storage with LevelDB.
 func NewDiskStorage(cfg Config, logger *slog.Logger) (*diskStorage, error) {
-	// Random subdirectory per startup
-	randBytes := make([]byte, 8)
-	if _, err := rand.Read(randBytes); err != nil {
-		return nil, fmt.Errorf("failed to generate random path: %w", err)
+	dbPath := cfg.DiskPath
+	if !cfg.DiskPersist {
+		// Ephemeral mode: random subdirectory, deleted on close
+		randBytes := make([]byte, 8)
+		if _, err := rand.Read(randBytes); err != nil {
+			return nil, fmt.Errorf("failed to generate random path: %w", err)
+		}
+		dbPath = filepath.Join(cfg.DiskPath, hex.EncodeToString(randBytes))
 	}
-	dbPath := filepath.Join(cfg.DiskPath, hex.EncodeToString(randBytes))
 
 	db, err := leveldb.OpenFile(dbPath, nil)
 	if err != nil {
-		return nil, fmt.Errorf("failed to open LevelDB: %w", err)
+		if cfg.DiskPersist {
+			var errCorrupted *leveldberrors.ErrCorrupted
+			if errors.As(err, &errCorrupted) {
+				db, err = leveldb.RecoverFile(dbPath, nil)
+			}
+		}
+		if err != nil {
+			return nil, fmt.Errorf("failed to open LevelDB: %w", err)
+		}
 	}
 
 	ms := NewMemoryStorage(cfg, logger)
@@ -551,6 +566,7 @@ func NewDiskStorage(cfg Config, logger *slog.Logger) (*diskStorage, error) {
 		memoryStorage: ms,
 		db:            db,
 		dbPath:        dbPath,
+		persistent:    cfg.DiskPersist,
 	}
 
 	// Lock session.mu before deleting LevelDB keys to serialize with
@@ -560,13 +576,6 @@ func NewDiskStorage(cfg Config, logger *slog.Logger) (*diskStorage, error) {
 			session.mu.Lock()
 			defer session.mu.Unlock()
 		}
-		_ = db.Delete([]byte(correlationID), nil)
-	}
-
-	// Delete stale LevelDB data before new sessions are added to the map.
-	// Runs under m.mu write lock so no concurrent AppendInteraction can
-	// be in flight for this correlation ID.
-	ms.onRegister = func(correlationID string) {
 		_ = db.Delete([]byte(correlationID), nil)
 	}
 
@@ -678,5 +687,8 @@ func (d *diskStorage) Close() error {
 	if err := d.db.Close(); err != nil {
 		return err
 	}
-	return os.RemoveAll(d.dbPath)
+	if !d.persistent {
+		return os.RemoveAll(d.dbPath)
+	}
+	return nil
 }

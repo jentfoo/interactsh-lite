@@ -287,10 +287,11 @@ var registerTests = []storageTest{
 			// Advance past TTL
 			ms.clock = func() time.Time { return baseTime.Add(48 * time.Hour) }
 
-			// Re-register with same secret - expired session evicted, fresh registration
+			// Re-register with same secret - expired session evicted, fresh registration.
+			// HKDF derivation: same inputs produce the same key.
 			aesKey2, err := built.Register(t.Context(), "testcorrelationid001", pubKey, "secret1")
 			require.NoError(t, err)
-			assert.NotEqual(t, aesKey1, aesKey2)
+			assert.Equal(t, aesKey1, aesKey2)
 			assert.Equal(t, uint64(1), built.SessionCount())
 			assert.Equal(t, uint64(1), built.EvictionCount())
 			assert.Equal(t, uint64(2), built.SessionsTotal())
@@ -1363,7 +1364,7 @@ func TestSharedBucketReadFrom(t *testing.T) {
 func TestDiskStorageClose(t *testing.T) {
 	t.Parallel()
 
-	t.Run("removes_db_directory", func(t *testing.T) {
+	t.Run("ephemeral_removes_directory", func(t *testing.T) {
 		tmpDir := t.TempDir()
 		cfg := Config{
 			Domains:          []string{"example.com"},
@@ -1385,5 +1386,157 @@ func TestDiskStorageClose(t *testing.T) {
 
 		_, err = os.Stat(dbPath)
 		assert.True(t, os.IsNotExist(err))
+	})
+
+	t.Run("persistent_preserves_directory", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		cfg := Config{
+			Domains:          []string{"example.com"},
+			Eviction:         30,
+			EvictionStrategy: EvictionSliding,
+			DiskPersist:      true,
+			DiskPath:         tmpDir,
+		}
+		logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+
+		ds, err := NewDiskStorage(cfg, logger)
+		require.NoError(t, err)
+		require.NoError(t, ds.Close())
+
+		_, err = os.Stat(tmpDir)
+		assert.NoError(t, err)
+	})
+}
+
+func TestDiskStorageRestart(t *testing.T) {
+	t.Parallel()
+
+	t.Run("interactions_survive_restart", func(t *testing.T) {
+		dbPath := t.TempDir()
+		logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+		cfg := Config{
+			Domains:          []string{"example.com"},
+			Eviction:         30,
+			EvictionStrategy: EvictionSliding,
+			Disk:             true,
+			DiskPersist:      true,
+			DiskPath:         dbPath,
+		}
+
+		// First instance: register, append, close
+		ds1, err := NewDiskStorage(cfg, logger)
+		require.NoError(t, err)
+
+		pubKey := testRSAKey(t)
+		aesKey1, err := ds1.Register(t.Context(), "testcorrelationid001", pubKey, "secret1")
+		require.NoError(t, err)
+		require.NoError(t, ds1.AppendInteraction("testcorrelationid001", []byte(`{"protocol":"http"}`)))
+		require.NoError(t, ds1.AppendInteraction("testcorrelationid001", []byte(`{"protocol":"dns"}`)))
+		require.NoError(t, ds1.Close())
+
+		// Second instance at same path
+		ds2, err := NewDiskStorage(cfg, logger)
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = ds2.Close() })
+
+		// No active session yet — poll fails
+		_, err = ds2.GetSession("testcorrelationid001", "secret1")
+		require.Error(t, err)
+
+		// Re-register with same credentials — HKDF produces same AES key
+		aesKey2, err := ds2.Register(t.Context(), "testcorrelationid001", pubKey, "secret1")
+		require.NoError(t, err)
+		assert.Equal(t, aesKey1, aesKey2)
+
+		// Poll returns the pre-restart interactions
+		interactions, err := testGetAndClearInteractions(t, ds2, "testcorrelationid001", "secret1")
+		require.NoError(t, err)
+		require.Len(t, interactions, 2)
+		assert.JSONEq(t, `{"protocol":"http"}`, decryptTestInteraction(t, interactions[0], aesKey2))
+		assert.JSONEq(t, `{"protocol":"dns"}`, decryptTestInteraction(t, interactions[1], aesKey2))
+
+		// Second poll returns empty
+		interactions, err = testGetAndClearInteractions(t, ds2, "testcorrelationid001", "secret1")
+		require.NoError(t, err)
+		assert.Empty(t, interactions)
+	})
+
+	t.Run("new_interactions_after_restart", func(t *testing.T) {
+		dbPath := t.TempDir()
+		logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+		cfg := Config{
+			Domains:          []string{"example.com"},
+			Eviction:         30,
+			EvictionStrategy: EvictionSliding,
+			Disk:             true,
+			DiskPersist:      true,
+			DiskPath:         dbPath,
+		}
+
+		// First instance: register, append, close
+		ds1, err := NewDiskStorage(cfg, logger)
+		require.NoError(t, err)
+
+		pubKey := testRSAKey(t)
+		_, err = ds1.Register(t.Context(), "testcorrelationid001", pubKey, "secret1")
+		require.NoError(t, err)
+		require.NoError(t, ds1.AppendInteraction("testcorrelationid001", []byte(`{"protocol":"http"}`)))
+		require.NoError(t, ds1.Close())
+
+		// Second instance: re-register and append new interactions
+		ds2, err := NewDiskStorage(cfg, logger)
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = ds2.Close() })
+
+		aesKey, err := ds2.Register(t.Context(), "testcorrelationid001", pubKey, "secret1")
+		require.NoError(t, err)
+		require.NoError(t, ds2.AppendInteraction("testcorrelationid001", []byte(`{"protocol":"smtp"}`)))
+
+		// Poll returns old + new
+		interactions, err := testGetAndClearInteractions(t, ds2, "testcorrelationid001", "secret1")
+		require.NoError(t, err)
+		require.Len(t, interactions, 2)
+		assert.JSONEq(t, `{"protocol":"http"}`, decryptTestInteraction(t, interactions[0], aesKey))
+		assert.JSONEq(t, `{"protocol":"smtp"}`, decryptTestInteraction(t, interactions[1], aesKey))
+	})
+
+	t.Run("interactions_dropped_before_reregister", func(t *testing.T) {
+		dbPath := t.TempDir()
+		logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+		cfg := Config{
+			Domains:          []string{"example.com"},
+			Eviction:         30,
+			EvictionStrategy: EvictionSliding,
+			Disk:             true,
+			DiskPersist:      true,
+			DiskPath:         dbPath,
+		}
+
+		// First instance
+		ds1, err := NewDiskStorage(cfg, logger)
+		require.NoError(t, err)
+
+		pubKey := testRSAKey(t)
+		_, err = ds1.Register(t.Context(), "testcorrelationid001", pubKey, "secret1")
+		require.NoError(t, err)
+		require.NoError(t, ds1.AppendInteraction("testcorrelationid001", []byte(`{"protocol":"http"}`)))
+		require.NoError(t, ds1.Close())
+
+		// Second instance: append before re-register (no session, dropped)
+		ds2, err := NewDiskStorage(cfg, logger)
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = ds2.Close() })
+
+		// No session in memory — interaction silently dropped
+		require.NoError(t, ds2.AppendInteraction("testcorrelationid001", []byte(`{"protocol":"dropped"}`)))
+
+		// Re-register and poll — only pre-restart interaction
+		aesKey, err := ds2.Register(t.Context(), "testcorrelationid001", pubKey, "secret1")
+		require.NoError(t, err)
+
+		interactions, err := testGetAndClearInteractions(t, ds2, "testcorrelationid001", "secret1")
+		require.NoError(t, err)
+		require.Len(t, interactions, 1)
+		assert.JSONEq(t, `{"protocol":"http"}`, decryptTestInteraction(t, interactions[0], aesKey))
 	})
 }

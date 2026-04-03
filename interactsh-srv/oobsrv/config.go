@@ -43,6 +43,7 @@ type Config struct {
 	HTTPDirectory       string   `yaml:"http-directory"`
 	DefaultHTTPResponse string   `yaml:"default-http-response"`
 	Disk                bool     `yaml:"disk"`
+	DiskPersist         bool     `yaml:"disk-persist"`
 	DiskPath            string   `yaml:"disk-path"`
 	ServerHeader        string   `yaml:"server-header"`
 	DisableVersion      bool     `yaml:"disable-version"`
@@ -131,8 +132,11 @@ func (c *Config) Validate() error {
 	if c.CorrelationIdLength < 3 {
 		return fmt.Errorf("correlation-id-length must be >= 3, got %d", c.CorrelationIdLength)
 	}
+	if c.DiskPersist {
+		c.Disk = true // --disk-persist implies --disk
+	}
 	if c.Disk && c.DiskPath == "" {
-		return errors.New("--disk-path is required when --disk is enabled")
+		return errors.New("--disk-path is required when --disk or --disk-persist is enabled")
 	}
 	if c.FTP && !c.Auth {
 		return errors.New("--ftp requires authentication (--auth or --token)")
