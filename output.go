@@ -118,6 +118,7 @@ type jsonInteraction struct {
 	RawRequest    string    `json:"raw-request,omitempty"`
 	RawResponse   string    `json:"raw-response,omitempty"`
 	SMTPFrom      string    `json:"smtp-from,omitempty"`
+	SMTPTo        string    `json:"smtp-to,omitempty"`
 	RemoteAddress string    `json:"remote-address"`
 	Timestamp     time.Time `json:"timestamp"`
 }
@@ -131,6 +132,7 @@ func formatJSON(w io.Writer, i *oobclient.Interaction) error {
 		RawRequest:    i.RawRequest,
 		RawResponse:   i.RawResponse,
 		SMTPFrom:      i.SMTPFrom,
+		SMTPTo:        i.SMTPTo,
 		RemoteAddress: i.RemoteAddress,
 		Timestamp:     i.Timestamp.UTC(),
 	}
