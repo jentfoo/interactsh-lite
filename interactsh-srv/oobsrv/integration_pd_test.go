@@ -561,10 +561,18 @@ func TestPDWireFormat_interaction_json_tags(t *testing.T) {
 		pdFields[f.Name] = name
 	}
 
+	// fields we add as extensions beyond the PD wire format
+	extensionFields := map[string]bool{
+		"SMTPTo": true,
+	}
+
 	for i := range ourType.NumField() {
 		f := ourType.Field(i)
 		tag := f.Tag.Get("json")
 		if tag == "" || tag == "-" {
+			continue
+		}
+		if extensionFields[f.Name] {
 			continue
 		}
 		name := strings.Split(tag, ",")[0]

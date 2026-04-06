@@ -164,12 +164,14 @@ func (s *Server) captureSMTPInteraction(from, rcpt, body, remoteIP string, now t
 		FullId:        recipientDomain,
 		RawRequest:    body,
 		SMTPFrom:      from,
+		SMTPTo:        rcpt,
 		RemoteAddress: remoteIP,
 		Timestamp:     now,
 	}, InteractionType{
 		Protocol:      "smtp",
 		RawRequest:    body,
 		SMTPFrom:      from,
+		SMTPTo:        rcpt,
 		RemoteAddress: remoteIP,
 		Timestamp:     now,
 	})
