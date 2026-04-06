@@ -71,6 +71,8 @@ func smtpTestServer(t *testing.T, srv *Server, tlsCfg *tls.Config, implicitTLS b
 	}
 	require.NoError(t, err)
 
+	ln = &teeListener{Listener: ln}
+
 	go func() { _ = smtpSrv.Serve(ln) }()
 
 	return ln.Addr().String(), func() { _ = smtpSrv.Close() }
@@ -593,6 +595,336 @@ func TestSMTPServer(t *testing.T) {
 		interactions, err := testGetAndClearInteractions(t, srv.storage, testCorrelationID, "secret")
 		require.NoError(t, err)
 		assert.Len(t, interactions, 5)
+	})
+}
+
+func TestTeeConn(t *testing.T) {
+	t.Parallel()
+
+	t.Run("reads_are_teed", func(t *testing.T) {
+		server, client := net.Pipe()
+		tc := &teeConn{Conn: server}
+		t.Cleanup(func() { _ = tc.Close() })
+
+		go func() {
+			_, _ = client.Write([]byte("EHLO test\r\n"))
+			_ = client.Close()
+		}()
+
+		buf := make([]byte, 64)
+		n, _ := tc.Read(buf)
+		assert.Equal(t, "EHLO test\r\n", string(buf[:n]))
+		assert.Equal(t, "EHLO test\r\n", tc.buf.String())
+	})
+
+	t.Run("cap_is_respected", func(t *testing.T) {
+		server, client := net.Pipe()
+		tc := &teeConn{Conn: server}
+		t.Cleanup(func() { _ = tc.Close() })
+
+		// Write more than teeConnMaxBuf
+		data := make([]byte, teeConnMaxBuf+1024)
+		for i := range data {
+			data[i] = 'A'
+		}
+		go func() {
+			_, _ = client.Write(data)
+			_ = client.Close()
+		}()
+
+		out := make([]byte, len(data))
+		total := 0
+		for total < len(data) {
+			n, err := tc.Read(out[total:])
+			total += n
+			if err != nil {
+				break
+			}
+		}
+		assert.Equal(t, len(data), total)
+		assert.Equal(t, teeConnMaxBuf, tc.buf.Len())
+	})
+
+	t.Run("reset_clears_and_allows_reuse", func(t *testing.T) {
+		server, client := net.Pipe()
+		tc := &teeConn{Conn: server}
+		t.Cleanup(func() { _ = tc.Close() })
+
+		go func() {
+			_, _ = client.Write([]byte("first"))
+			_, _ = client.Write([]byte("second"))
+			_ = client.Close()
+		}()
+
+		buf := make([]byte, 64)
+		_, _ = tc.Read(buf)
+		tc.Reset()
+		n, _ := tc.Read(buf)
+		assert.Equal(t, "second", string(buf[:n]))
+		assert.Equal(t, "second", tc.buf.String())
+	})
+
+	t.Run("stopped_prevents_capture", func(t *testing.T) {
+		server, client := net.Pipe()
+		tc := &teeConn{Conn: server}
+		t.Cleanup(func() { _ = tc.Close() })
+
+		go func() {
+			_, _ = client.Write([]byte("before"))
+			_, _ = client.Write([]byte("after"))
+			_ = client.Close()
+		}()
+
+		buf := make([]byte, 64)
+		_, _ = tc.Read(buf)
+		assert.Equal(t, "before", tc.buf.String())
+
+		tc.stopped = true
+		n, _ := tc.Read(buf)
+		assert.Equal(t, "after", string(buf[:n]))
+		assert.Equal(t, "before", tc.buf.String()) // unchanged
+	})
+
+	t.Run("reset_clears_stopped", func(t *testing.T) {
+		server, client := net.Pipe()
+		tc := &teeConn{Conn: server}
+		t.Cleanup(func() { _ = tc.Close() })
+
+		go func() {
+			_, _ = client.Write([]byte("one"))
+			_, _ = client.Write([]byte("two"))
+			_ = client.Close()
+		}()
+
+		buf := make([]byte, 64)
+		_, _ = tc.Read(buf)
+		tc.stopped = true
+		tc.Reset()
+
+		assert.False(t, tc.stopped)
+		assert.Equal(t, 0, tc.buf.Len())
+
+		n, _ := tc.Read(buf)
+		assert.Equal(t, "two", string(buf[:n]))
+		assert.Equal(t, "two", tc.buf.String())
+	})
+}
+
+func TestTeeListener(t *testing.T) {
+	t.Parallel()
+
+	t.Run("accept_returns_tee_conn", func(t *testing.T) {
+		inner, err := net.Listen("tcp", "127.0.0.1:0")
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = inner.Close() })
+
+		tl := &teeListener{Listener: inner}
+
+		go func() {
+			conn, _ := net.Dial("tcp", inner.Addr().String())
+			if conn != nil {
+				_ = conn.Close()
+			}
+		}()
+
+		conn, err := tl.Accept()
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = conn.Close() })
+
+		_, ok := conn.(*teeConn)
+		assert.True(t, ok)
+	})
+}
+
+func TestExtractRawPath(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{"normal_address", "<sender@example.com>", "sender@example.com"},
+		{"with_esmtp_params", "<sender@example.com> BODY=8BITMIME", "sender@example.com"},
+		{"quoted_local_with_gt", `<"ABCcollab@psres.net> "@psres.net>`, `"ABCcollab@psres.net> "@psres.net`},
+		{"null_sender", "<>", ""},
+		{"no_brackets", "sender@example.com", ""},
+		{"empty_string", "", ""},
+		{"leading_whitespace", " <user@host.com>", "user@host.com"},
+		{"quoted_with_escape", `<"user\"name"@host.com>`, `"user\"name"@host.com`},
+		{"source_route", "<@relay:user@example.com>", "@relay:user@example.com"},
+		{"simple_quoted", `<"user"@example.com>`, `"user"@example.com`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, extractRawPath(tc.input))
+		})
+	}
+}
+
+func TestParseRawEnvelope(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name           string
+		raw            string
+		wantFrom       string
+		wantRecipients []string
+	}{
+		{
+			"normal_envelope",
+			"EHLO client\r\nMAIL FROM:<sender@example.com>\r\nRCPT TO:<rcpt@example.com>\r\n",
+			"sender@example.com",
+			[]string{"rcpt@example.com"},
+		},
+		{
+			"multiple_recipients",
+			"MAIL FROM:<from@a.com>\r\nRCPT TO:<one@b.com>\r\nRCPT TO:<two@c.com>\r\n",
+			"from@a.com",
+			[]string{"one@b.com", "two@c.com"},
+		},
+		{
+			"empty_buffer",
+			"",
+			"",
+			nil,
+		},
+		{
+			"no_smtp_commands",
+			"EHLO client\r\nAUTH PLAIN dXNlcg==\r\n",
+			"",
+			nil,
+		},
+		{
+			"case_insensitive",
+			"mail from:<sender@test.com>\r\nrcpt to:<rcpt@test.com>\r\n",
+			"sender@test.com",
+			[]string{"rcpt@test.com"},
+		},
+		{
+			"null_sender",
+			"MAIL FROM:<>\r\nRCPT TO:<rcpt@test.com>\r\n",
+			"",
+			[]string{"rcpt@test.com"},
+		},
+		{
+			"with_esmtp_params",
+			"MAIL FROM:<sender@a.com> BODY=8BITMIME\r\nRCPT TO:<rcpt@b.com> NOTIFY=SUCCESS\r\n",
+			"sender@a.com",
+			[]string{"rcpt@b.com"},
+		},
+		{
+			"quoted_local_part",
+			"MAIL FROM:<sender@a.com>\r\nRCPT TO:<\"quoted>addr\"@b.com>\r\n",
+			"sender@a.com",
+			[]string{`"quoted>addr"@b.com`},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			from, recipients := parseRawEnvelope(tc.raw)
+			assert.Equal(t, tc.wantFrom, from)
+			assert.Equal(t, tc.wantRecipients, recipients)
+		})
+	}
+}
+
+func TestSMTPRawEnvelopePreservation(t *testing.T) {
+	t.Parallel()
+
+	t.Run("quoted_local_part_preserved", func(t *testing.T) {
+		srv := testServerWithStorage(t)
+		pubKey := testRSAKey(t)
+		aesKey, err := srv.storage.Register(t.Context(), testCorrelationID, pubKey, "secret")
+		require.NoError(t, err)
+
+		addr, cleanup := smtpTestServer(t, srv, nil, false)
+		t.Cleanup(cleanup)
+
+		conn, err := net.DialTimeout("tcp", addr, time.Second)
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = conn.Close() })
+
+		reader := bufio.NewReader(conn)
+		readLine := func() string {
+			line, _ := reader.ReadString('\n')
+			return line
+		}
+		writeLine := func(s string) {
+			_, _ = fmt.Fprintf(conn, "%s\r\n", s)
+		}
+
+		// Read greeting
+		readLine()
+
+		// EHLO and read multi-line response
+		writeLine("EHLO test")
+		for {
+			line := readLine()
+			if len(line) < 4 || line[3] == ' ' {
+				break
+			}
+		}
+
+		rcptDomain := testCorrelationID + testNonce + "." + testDomain
+
+		writeLine(`MAIL FROM:<"quoted sender"@example.com>`)
+		readLine()
+
+		writeLine(fmt.Sprintf(`RCPT TO:<"quoted rcpt"@%s>`, rcptDomain))
+		readLine()
+
+		writeLine("DATA")
+		readLine()
+
+		writeLine("Subject: Test\r\n\r\nBody\r\n.")
+		readLine()
+
+		interactions, err := testGetAndClearInteractions(t, srv.storage, testCorrelationID, "secret")
+		require.NoError(t, err)
+		require.Len(t, interactions, 1)
+
+		decrypted := decryptTestInteraction(t, interactions[0], aesKey)
+		var interaction InteractionType
+		require.NoError(t, json.Unmarshal([]byte(decrypted), &interaction))
+
+		assert.Equal(t, "smtp", interaction.Protocol)
+		assert.Equal(t, `"quoted sender"@example.com`, interaction.SMTPFrom)
+		assert.Equal(t, `"quoted rcpt"@`+rcptDomain, interaction.SMTPTo)
+	})
+
+	t.Run("standard_address_unchanged", func(t *testing.T) {
+		srv := testServerWithStorage(t)
+		pubKey := testRSAKey(t)
+		aesKey, err := srv.storage.Register(t.Context(), testCorrelationID, pubKey, "secret")
+		require.NoError(t, err)
+
+		addr, cleanup := smtpTestServer(t, srv, nil, false)
+		t.Cleanup(cleanup)
+
+		c, err := netsmtp.Dial(addr)
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = c.Close() })
+
+		rcpt := "user@" + testCorrelationID + testNonce + "." + testDomain
+		require.NoError(t, c.Mail("sender@example.com"))
+		require.NoError(t, c.Rcpt(rcpt))
+		w, err := c.Data()
+		require.NoError(t, err)
+		_, _ = w.Write([]byte("Subject: Test\r\n\r\nBody"))
+		require.NoError(t, w.Close())
+
+		interactions, err := testGetAndClearInteractions(t, srv.storage, testCorrelationID, "secret")
+		require.NoError(t, err)
+		require.Len(t, interactions, 1)
+
+		decrypted := decryptTestInteraction(t, interactions[0], aesKey)
+		var interaction InteractionType
+		require.NoError(t, json.Unmarshal([]byte(decrypted), &interaction))
+
+		// Standard addresses are identical whether raw or parsed
+		assert.Equal(t, "sender@example.com", interaction.SMTPFrom)
+		assert.Equal(t, rcpt, interaction.SMTPTo)
 	})
 }
 

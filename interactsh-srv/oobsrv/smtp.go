@@ -1,6 +1,7 @@
 package oobsrv
 
 import (
+	"bytes"
 	"crypto/tls"
 	"fmt"
 	"io"
@@ -14,6 +15,102 @@ import (
 	"github.com/emersion/go-smtp"
 )
 
+const teeConnMaxBuf = 8192 // 8 KB cap for raw SMTP envelope capture
+
+// teeConn wraps a net.Conn and copies Read bytes into a capped buffer.
+// Used to capture raw SMTP commands before go-smtp's parser normalizes them.
+// go-smtp processes one connection per goroutine, so no mutex is needed.
+type teeConn struct {
+	net.Conn
+	buf     bytes.Buffer
+	stopped bool // set after snapshot to stop capturing body/ciphertext
+}
+
+func (t *teeConn) Read(p []byte) (int, error) {
+	n, err := t.Conn.Read(p)
+	if n > 0 && !t.stopped && t.buf.Len() < teeConnMaxBuf {
+		limit := teeConnMaxBuf - t.buf.Len()
+		if n < limit {
+			limit = n
+		}
+		t.buf.Write(p[:limit])
+	}
+	return n, err
+}
+
+func (t *teeConn) Reset() {
+	t.buf.Reset()
+	t.stopped = false
+}
+
+// teeListener wraps a net.Listener, returning teeConn-wrapped connections.
+type teeListener struct {
+	net.Listener
+}
+
+func (l *teeListener) Accept() (net.Conn, error) {
+	c, err := l.Listener.Accept()
+	if err != nil {
+		return nil, err
+	}
+	return &teeConn{Conn: c}, nil
+}
+
+// extractRawPath extracts the mailbox path from a raw SMTP parameter string
+// (the text after "MAIL FROM:" or "RCPT TO:"). It finds the content between
+// the outermost angle brackets, handling quoted strings that may contain '>'.
+// Returns empty string on failure — caller should use the parsed fallback.
+func extractRawPath(param string) string {
+	param = strings.TrimSpace(param)
+	if strings.HasPrefix(param, "<>") {
+		return ""
+	}
+
+	start := strings.IndexByte(param, '<')
+	if start < 0 {
+		return ""
+	}
+	inner := param[start+1:]
+
+	// scan for closing '>', skipping '>' inside quoted strings
+	var inQuote bool
+	for i := 0; i < len(inner); i++ {
+		switch {
+		case inner[i] == '\\' && inQuote:
+			i++ // skip escaped character
+		case inner[i] == '"':
+			inQuote = !inQuote
+		case inner[i] == '>' && !inQuote:
+			return inner[:i]
+		}
+	}
+	return ""
+}
+
+// parseRawEnvelope scans raw SMTP session bytes for MAIL FROM and RCPT TO
+// commands and extracts their paths without the address-parsing normalization
+// that go-smtp applies (bracket stripping, quote removal, escape processing).
+func parseRawEnvelope(raw string) (from string, recipients []string) {
+	const mailPrefix = "MAIL FROM:"
+	const rcptPrefix = "RCPT TO:"
+
+	for _, line := range strings.Split(raw, "\n") {
+		line = strings.TrimRight(line, "\r")
+		upper := strings.ToUpper(line)
+
+		if strings.HasPrefix(upper, mailPrefix) {
+			if path := extractRawPath(line[len(mailPrefix):]); path != "" {
+				from = path
+			}
+		} else if strings.HasPrefix(upper, rcptPrefix) {
+			if path := extractRawPath(line[len(rcptPrefix):]); path != "" {
+				recipients = append(recipients, path)
+			}
+		}
+	}
+	return from, recipients
+}
+
 // smtpBackend implements smtp.Backend for OOB interaction capture.
 type smtpBackend struct {
 	server *Server
@@ -23,9 +120,14 @@ type smtpBackend struct {
 var _ smtp.Backend = (*smtpBackend)(nil)
 
 func (b *smtpBackend) NewSession(c *smtp.Conn) (smtp.Session, error) {
+	var tee *teeConn
+	if tc, ok := c.Conn().(*teeConn); ok {
+		tee = tc
+	}
 	return &smtpSession{
 		server:     b.server,
 		remoteAddr: c.Conn().RemoteAddr().String(),
+		tee:        tee,
 	}, nil
 }
 
@@ -34,6 +136,7 @@ type smtpSession struct {
 	remoteAddr string
 	from       string
 	recipients []string
+	tee        *teeConn // nil after STARTTLS (go-smtp replaces conn with *tls.Conn, so type assertion fails)
 }
 
 // Compiler check that smtpSession implements smtp.AuthSession.
@@ -69,6 +172,21 @@ func (s *smtpSession) Rcpt(to string, opts *smtp.RcptOptions) error {
 }
 
 func (s *smtpSession) Data(r io.Reader) error {
+	// Snapshot raw envelope before reading body (which adds to the tee buffer).
+	// Use raw values when extraction succeeds, parsed values otherwise.
+	from := s.from
+	recipients := s.recipients
+	if s.tee != nil {
+		rawFrom, rawRecipients := parseRawEnvelope(s.tee.buf.String())
+		s.tee.stopped = true // stop capturing message body / post-STARTTLS ciphertext
+		if rawFrom != "" {
+			from = rawFrom
+		}
+		if len(rawRecipients) > 0 {
+			recipients = rawRecipients
+		}
+	}
+
 	// Limit what we store but accept the full message (SIZE 0 advertised)
 	orig := r
 	if s.server.cfg.MaxRequestSize > 0 {
@@ -80,13 +198,16 @@ func (s *smtpSession) Data(r io.Reader) error {
 	}
 	// Drain any excess so the SMTP transaction completes successfully
 	_, _ = io.Copy(io.Discard, orig)
-	s.server.onSMTPData(s.from, s.recipients, body, s.remoteAddr)
+	s.server.onSMTPData(from, recipients, body, s.remoteAddr)
 	return nil
 }
 
 func (s *smtpSession) Reset() {
 	s.from = ""
 	s.recipients = nil
+	if s.tee != nil {
+		s.tee.Reset()
+	}
 }
 
 func (s *smtpSession) Logout() error {
@@ -263,6 +384,8 @@ func (s *Server) startSMTPPort(backend smtp.Backend, hostname string, port int, 
 		s.logger.Warn(fmt.Sprintf("[%s] bind failed, skipping", name), "addr", addr, "error", err)
 		return
 	}
+
+	ln = &teeListener{Listener: ln}
 
 	svc := &smtpService{
 		name:     name,
