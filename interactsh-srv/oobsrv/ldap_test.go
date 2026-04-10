@@ -49,7 +49,7 @@ func TestCaptureLDAPSearchInteraction(t *testing.T) {
 
 	t.Run("stores_correlation_match", func(t *testing.T) {
 		srv := testServerWithStorage(t)
-		pubKey := testRSAKey(t)
+		pubKey := &sharedRSAKey.PublicKey
 		aesKey, err := srv.storage.Register(t.Context(), testCorrelationID, pubKey, "secret", nil)
 		require.NoError(t, err)
 
@@ -76,7 +76,7 @@ func TestCaptureLDAPSearchInteraction(t *testing.T) {
 
 	t.Run("no_match_no_storage", func(t *testing.T) {
 		srv := testServerWithStorage(t)
-		pubKey := testRSAKey(t)
+		pubKey := &sharedRSAKey.PublicKey
 		_, err := srv.storage.Register(t.Context(), testCorrelationID, pubKey, "secret", nil)
 		require.NoError(t, err)
 
@@ -90,7 +90,7 @@ func TestCaptureLDAPSearchInteraction(t *testing.T) {
 
 	t.Run("cid_with_domain_suffix", func(t *testing.T) {
 		srv := testServerWithStorage(t)
-		pubKey := testRSAKey(t)
+		pubKey := &sharedRSAKey.PublicKey
 		aesKey, err := srv.storage.Register(t.Context(), testCorrelationID, pubKey, "secret", nil)
 		require.NoError(t, err)
 
@@ -189,7 +189,7 @@ func TestLDAPServer(t *testing.T) {
 
 	t.Run("captures_search_interaction", func(t *testing.T) {
 		srv := testServerWithStorage(t)
-		pubKey := testRSAKey(t)
+		pubKey := &sharedRSAKey.PublicKey
 		aesKey, err := srv.storage.Register(t.Context(), testCorrelationID, pubKey, "secret", nil)
 		require.NoError(t, err)
 
@@ -434,7 +434,7 @@ func TestLDAPServer(t *testing.T) {
 			c.Token = testToken
 			c.LDAP = true
 		})
-		pubKey := testRSAKey(t)
+		pubKey := &sharedRSAKey.PublicKey
 
 		_, err := srv.storage.Register(t.Context(), testCorrelationID, pubKey, "secret", nil)
 		require.NoError(t, err)

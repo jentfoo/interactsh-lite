@@ -37,13 +37,14 @@ func testServerWithStorage(t *testing.T, opts ...func(*Config)) *Server {
 	return srv
 }
 
-// testRSAKeyPair generates a 2048-bit RSA key pair for testing.
-func testRSAKeyPair(t *testing.T) *rsa.PrivateKey {
-	t.Helper()
+var sharedRSAKey *rsa.PrivateKey
 
+func init() {
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
-	require.NoError(t, err)
-	return key
+	if err != nil {
+		panic("test RSA key generation: " + err.Error())
+	}
+	sharedRSAKey = key
 }
 
 // registerJSON builds the POST /register request body.
@@ -95,7 +96,7 @@ func TestHandleRegister(t *testing.T) {
 
 	t.Run("successful_registration", func(t *testing.T) {
 		srv := testServerWithStorage(t)
-		key := testRSAKeyPair(t)
+		key := sharedRSAKey
 
 		body := registerJSON(t, &key.PublicKey, testCorrelationID, "secret-123")
 		rec := httptest.NewRecorder()
@@ -114,7 +115,7 @@ func TestHandleRegister(t *testing.T) {
 
 	t.Run("short_correlation_id", func(t *testing.T) {
 		srv := testServerWithStorage(t)
-		key := testRSAKeyPair(t)
+		key := sharedRSAKey
 
 		body := registerJSON(t, &key.PublicKey, "tooshort", "secret-123")
 		rec := httptest.NewRecorder()
@@ -130,7 +131,7 @@ func TestHandleRegister(t *testing.T) {
 
 	t.Run("long_id_truncated", func(t *testing.T) {
 		srv := testServerWithStorage(t)
-		key := testRSAKeyPair(t)
+		key := sharedRSAKey
 
 		const longID = "abcdefghijklmnopqrstuvwxyz123456"
 		body := registerJSON(t, &key.PublicKey, longID, "secret-123")
@@ -144,7 +145,7 @@ func TestHandleRegister(t *testing.T) {
 
 	t.Run("keep_alive_duplicate", func(t *testing.T) {
 		srv := testServerWithStorage(t)
-		key := testRSAKeyPair(t)
+		key := sharedRSAKey
 
 		body := registerJSON(t, &key.PublicKey, testCorrelationID, "secret-123")
 
@@ -164,7 +165,7 @@ func TestHandleRegister(t *testing.T) {
 
 	t.Run("duplicate_wrong_secret", func(t *testing.T) {
 		srv := testServerWithStorage(t)
-		key := testRSAKeyPair(t)
+		key := sharedRSAKey
 
 		body1 := registerJSON(t, &key.PublicKey, testCorrelationID, "secret-1")
 		rec := httptest.NewRecorder()
@@ -198,7 +199,7 @@ func TestHandleRegister(t *testing.T) {
 
 	t.Run("empty_secret_rejected", func(t *testing.T) {
 		srv := testServerWithStorage(t)
-		key := testRSAKeyPair(t)
+		key := sharedRSAKey
 
 		body := registerJSON(t, &key.PublicKey, testCorrelationID, "")
 		rec := httptest.NewRecorder()
@@ -234,7 +235,7 @@ func TestHandleRegister(t *testing.T) {
 		srv := testServerWithStorage(t)
 
 		for i, id := range []string{"aaaaaaaaaaaaaaaaaaaa", "bbbbbbbbbbbbbbbbbbbb"} {
-			key := testRSAKeyPair(t)
+			key := sharedRSAKey
 			body := registerJSON(t, &key.PublicKey, id, "secret")
 			rec := httptest.NewRecorder()
 			req := httptest.NewRequest(http.MethodPost, "/register", bytes.NewReader(body))
@@ -250,7 +251,7 @@ func TestHandleRegister(t *testing.T) {
 
 		bodies := make([][]byte, 20)
 		for i := range 20 {
-			key := testRSAKeyPair(t)
+			key := sharedRSAKey
 			cid := fmt.Sprintf("concurr%013d", i)
 			bodies[i] = registerJSON(t, &key.PublicKey, cid, fmt.Sprintf("secret-%d", i))
 		}
@@ -278,7 +279,7 @@ func TestHandleRegister(t *testing.T) {
 			c.Token = testToken
 			c.DynamicResp = true
 		})
-		key := testRSAKeyPair(t)
+		key := sharedRSAKey
 
 		b64Key := encodeTestPublicKey(t, &key.PublicKey)
 		body, err := json.Marshal(map[string]any{
@@ -305,7 +306,7 @@ func TestHandleRegister(t *testing.T) {
 		srv := testServerWithStorage(t, func(c *Config) {
 			c.DynamicResp = true
 		})
-		key := testRSAKeyPair(t)
+		key := sharedRSAKey
 
 		b64Key := encodeTestPublicKey(t, &key.PublicKey)
 		body, err := json.Marshal(map[string]any{
@@ -330,7 +331,7 @@ func TestHandleRegister(t *testing.T) {
 		srv := testServerWithStorage(t, func(c *Config) {
 			c.DynamicResp = true
 		})
-		key := testRSAKeyPair(t)
+		key := sharedRSAKey
 
 		b64Key := encodeTestPublicKey(t, &key.PublicKey)
 		body, err := json.Marshal(map[string]any{
@@ -356,7 +357,7 @@ func TestHandleRegister(t *testing.T) {
 
 	t.Run("response_dynamic_resp_disabled", func(t *testing.T) {
 		srv := testServerWithStorage(t) // DynamicResp false by default
-		key := testRSAKeyPair(t)
+		key := sharedRSAKey
 
 		b64Key := encodeTestPublicKey(t, &key.PublicKey)
 		body, err := json.Marshal(map[string]any{
@@ -386,7 +387,7 @@ func TestHandlePoll(t *testing.T) {
 
 	t.Run("poll_with_interactions", func(t *testing.T) {
 		srv := testServerWithStorage(t)
-		key := testRSAKeyPair(t)
+		key := sharedRSAKey
 
 		aesKey, err := srv.storage.Register(t.Context(), testCorrelationID, &key.PublicKey, "secret", nil)
 		require.NoError(t, err)
@@ -425,7 +426,7 @@ func TestHandlePoll(t *testing.T) {
 
 	t.Run("poll_empty", func(t *testing.T) {
 		srv := testServerWithStorage(t)
-		key := testRSAKeyPair(t)
+		key := sharedRSAKey
 
 		_, err := srv.storage.Register(t.Context(), testCorrelationID, &key.PublicKey, "secret", nil)
 		require.NoError(t, err)
@@ -445,7 +446,7 @@ func TestHandlePoll(t *testing.T) {
 
 	t.Run("destructive_read", func(t *testing.T) {
 		srv := testServerWithStorage(t)
-		key := testRSAKeyPair(t)
+		key := sharedRSAKey
 
 		_, err := srv.storage.Register(t.Context(), testCorrelationID, &key.PublicKey, "secret", nil)
 		require.NoError(t, err)
@@ -470,7 +471,7 @@ func TestHandlePoll(t *testing.T) {
 
 	t.Run("fifo_ordering", func(t *testing.T) {
 		srv := testServerWithStorage(t)
-		key := testRSAKeyPair(t)
+		key := sharedRSAKey
 
 		aesKey, err := srv.storage.Register(t.Context(), testCorrelationID, &key.PublicKey, "secret", nil)
 		require.NoError(t, err)
@@ -512,7 +513,7 @@ func TestHandlePoll(t *testing.T) {
 
 	t.Run("wrong_secret", func(t *testing.T) {
 		srv := testServerWithStorage(t)
-		key := testRSAKeyPair(t)
+		key := sharedRSAKey
 
 		_, err := srv.storage.Register(t.Context(), testCorrelationID, &key.PublicKey, "correct", nil)
 		require.NoError(t, err)
@@ -529,7 +530,7 @@ func TestHandlePoll(t *testing.T) {
 
 	t.Run("id_truncation", func(t *testing.T) {
 		srv := testServerWithStorage(t)
-		key := testRSAKeyPair(t)
+		key := sharedRSAKey
 
 		_, err := srv.storage.Register(t.Context(), testCorrelationID, &key.PublicKey, "secret", nil)
 		require.NoError(t, err)
@@ -543,7 +544,7 @@ func TestHandlePoll(t *testing.T) {
 
 	t.Run("tlddata_omitempty", func(t *testing.T) {
 		srv := testServerWithStorage(t)
-		key := testRSAKeyPair(t)
+		key := sharedRSAKey
 
 		_, err := srv.storage.Register(t.Context(), testCorrelationID, &key.PublicKey, "secret", nil)
 		require.NoError(t, err)
@@ -569,7 +570,7 @@ func TestHandlePoll(t *testing.T) {
 			c.Token = "tok"
 			c.FTP = true
 		})
-		key := testRSAKeyPair(t)
+		key := sharedRSAKey
 
 		_, err := srv.storage.Register(t.Context(), testCorrelationID, &key.PublicKey, "secret", nil)
 		require.NoError(t, err)
@@ -600,7 +601,7 @@ func TestHandlePoll(t *testing.T) {
 			c.Auth = true
 			c.Token = "tok"
 		})
-		key := testRSAKeyPair(t)
+		key := sharedRSAKey
 
 		_, err := srv.storage.Register(t.Context(), testCorrelationID, &key.PublicKey, "secret", nil)
 		require.NoError(t, err)
@@ -628,8 +629,8 @@ func TestHandlePoll(t *testing.T) {
 			c.Token = "tok"
 		})
 
-		key1 := testRSAKeyPair(t)
-		key2 := testRSAKeyPair(t)
+		key1 := sharedRSAKey
+		key2 := sharedRSAKey
 		const id1 = "aaaaaaaaaaaaaaaaaaaa"
 		const id2 = "bbbbbbbbbbbbbbbbbbbb"
 
@@ -674,7 +675,7 @@ func TestHandlePoll(t *testing.T) {
 
 	t.Run("aes_key_encrypted_freshly", func(t *testing.T) {
 		srv := testServerWithStorage(t)
-		key := testRSAKeyPair(t)
+		key := sharedRSAKey
 
 		body := registerJSON(t, &key.PublicKey, testCorrelationID, "secret")
 		rec := httptest.NewRecorder()
@@ -726,7 +727,7 @@ func TestHandlePoll(t *testing.T) {
 
 	t.Run("empty_secret_rejected", func(t *testing.T) {
 		srv := testServerWithStorage(t)
-		key := testRSAKeyPair(t)
+		key := sharedRSAKey
 
 		body := registerJSON(t, &key.PublicKey, testCorrelationID, "mysecret")
 		rec := httptest.NewRecorder()
@@ -747,7 +748,7 @@ func TestHandleDeregister(t *testing.T) {
 
 	t.Run("successful_deregister", func(t *testing.T) {
 		srv := testServerWithStorage(t)
-		key := testRSAKeyPair(t)
+		key := sharedRSAKey
 
 		_, err := srv.storage.Register(t.Context(), testCorrelationID, &key.PublicKey, "secret", nil)
 		require.NoError(t, err)
@@ -780,7 +781,7 @@ func TestHandleDeregister(t *testing.T) {
 
 	t.Run("wrong_secret", func(t *testing.T) {
 		srv := testServerWithStorage(t)
-		key := testRSAKeyPair(t)
+		key := sharedRSAKey
 
 		_, err := srv.storage.Register(t.Context(), testCorrelationID, &key.PublicKey, "correct", nil)
 		require.NoError(t, err)
@@ -798,7 +799,7 @@ func TestHandleDeregister(t *testing.T) {
 
 	t.Run("session_counter_decrements", func(t *testing.T) {
 		srv := testServerWithStorage(t)
-		key := testRSAKeyPair(t)
+		key := sharedRSAKey
 
 		_, err := srv.storage.Register(t.Context(), testCorrelationID, &key.PublicKey, "secret", nil)
 		require.NoError(t, err)
@@ -816,7 +817,7 @@ func TestHandleDeregister(t *testing.T) {
 
 	t.Run("id_truncation", func(t *testing.T) {
 		srv := testServerWithStorage(t)
-		key := testRSAKeyPair(t)
+		key := sharedRSAKey
 
 		_, err := srv.storage.Register(t.Context(), testCorrelationID, &key.PublicKey, "secret", nil)
 		require.NoError(t, err)
@@ -859,7 +860,7 @@ func TestHandleDeregister(t *testing.T) {
 
 	t.Run("second_deregister_fails", func(t *testing.T) {
 		srv := testServerWithStorage(t)
-		key := testRSAKeyPair(t)
+		key := sharedRSAKey
 
 		regBody := registerJSON(t, &key.PublicKey, testCorrelationID, "secret")
 		rec := httptest.NewRecorder()
@@ -890,7 +891,7 @@ func TestEndToEndLifecycle(t *testing.T) {
 	t.Parallel()
 
 	srv := testServerWithStorage(t)
-	key := testRSAKeyPair(t)
+	key := sharedRSAKey
 
 	// 1. Register
 	regBody := registerJSON(t, &key.PublicKey, testCorrelationID, "my-secret")
@@ -961,7 +962,7 @@ func TestEndpointsAuthIntegration(t *testing.T) {
 		c.Auth = true
 		c.Token = "valid-token"
 	})
-	key := testRSAKeyPair(t)
+	key := sharedRSAKey
 
 	regBody := registerJSON(t, &key.PublicKey, testCorrelationID, "secret")
 

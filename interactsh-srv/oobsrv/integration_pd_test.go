@@ -516,7 +516,7 @@ func TestPDWireFormat_register_request(t *testing.T) {
 	assert.Equal(t, uint64(1), srv.storage.SessionCount())
 
 	// register a second client using PD's RegisterRequest format manually
-	key := testRSAKey(t)
+	key := &sharedRSAKey.PublicKey
 	pubKeyStr := encodeTestPublicKey(t, key)
 	regReq := pdserver.RegisterRequest{
 		PublicKey:     pubKeyStr,

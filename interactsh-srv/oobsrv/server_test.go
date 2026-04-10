@@ -240,7 +240,7 @@ func TestCaptureInteraction(t *testing.T) {
 		srv, err := New(cfg, testLogger())
 		require.NoError(t, err)
 
-		pubKey := testRSAKey(t)
+		pubKey := &sharedRSAKey.PublicKey
 		aesKey, err := srv.storage.Register(t.Context(), testCorrelationID, pubKey, "secret", nil)
 		require.NoError(t, err)
 
@@ -304,7 +304,7 @@ func TestCaptureInteraction(t *testing.T) {
 		srv, err := New(cfg, testLogger())
 		require.NoError(t, err)
 
-		pubKey := testRSAKey(t)
+		pubKey := &sharedRSAKey.PublicKey
 
 		_, err = srv.storage.Register(t.Context(), testCorrelationID, pubKey, "secret", nil)
 		require.NoError(t, err)

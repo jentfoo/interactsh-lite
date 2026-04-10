@@ -79,7 +79,7 @@ const (
 // scanLabels can match it in the request host.
 func registerTestSession(t *testing.T, srv *Server) string {
 	t.Helper()
-	pubKey := testRSAKey(t)
+	pubKey := &sharedRSAKey.PublicKey
 	_, err := srv.storage.Register(t.Context(), testCorrelationID, pubKey, "secret", nil)
 	require.NoError(t, err)
 	return testCorrelationID
@@ -100,7 +100,7 @@ func TestOnHTTPInteraction(t *testing.T) {
 
 	t.Run("unconfigured_domain", func(t *testing.T) {
 		srv := testServerWithStorage(t)
-		pubKey := testRSAKey(t)
+		pubKey := &sharedRSAKey.PublicKey
 		_, err := srv.storage.Register(t.Context(), testCorrelationID, pubKey, "secret", nil)
 		require.NoError(t, err)
 
@@ -116,7 +116,7 @@ func TestOnHTTPInteraction(t *testing.T) {
 
 	t.Run("stores_correlation_match", func(t *testing.T) {
 		srv := testServerWithStorage(t)
-		pubKey := testRSAKey(t)
+		pubKey := &sharedRSAKey.PublicKey
 		aesKey, err := srv.storage.Register(t.Context(), testCorrelationID, pubKey, "secret", nil)
 		require.NoError(t, err)
 
@@ -148,7 +148,7 @@ func TestOnHTTPInteraction(t *testing.T) {
 
 	t.Run("protocol_https", func(t *testing.T) {
 		srv := testServerWithStorage(t)
-		pubKey := testRSAKey(t)
+		pubKey := &sharedRSAKey.PublicKey
 		aesKey, err := srv.storage.Register(t.Context(), testCorrelationID, pubKey, "secret", nil)
 		require.NoError(t, err)
 
@@ -201,7 +201,7 @@ func TestOnHTTPInteraction(t *testing.T) {
 		srv := testServerWithStorage(t, func(c *Config) {
 			c.ScanEverywhere = true
 		})
-		pubKey := testRSAKey(t)
+		pubKey := &sharedRSAKey.PublicKey
 		aesKey, err := srv.storage.Register(t.Context(), testCorrelationID, pubKey, "secret", nil)
 		require.NoError(t, err)
 
@@ -227,7 +227,7 @@ func TestOnHTTPInteraction(t *testing.T) {
 		srv := testServerWithStorage(t, func(c *Config) {
 			c.ScanEverywhere = true
 		})
-		pubKey := testRSAKey(t)
+		pubKey := &sharedRSAKey.PublicKey
 		aesKey, err := srv.storage.Register(t.Context(), testCorrelationID, pubKey, "secret", nil)
 		require.NoError(t, err)
 
@@ -251,7 +251,7 @@ func TestOnHTTPInteraction(t *testing.T) {
 
 	t.Run("host_with_port", func(t *testing.T) {
 		srv := testServerWithStorage(t)
-		pubKey := testRSAKey(t)
+		pubKey := &sharedRSAKey.PublicKey
 		_, err := srv.storage.Register(t.Context(), testCorrelationID, pubKey, "secret", nil)
 		require.NoError(t, err)
 
@@ -268,7 +268,7 @@ func TestOnHTTPInteraction(t *testing.T) {
 
 	t.Run("multiple_cids_in_host", func(t *testing.T) {
 		srv := testServerWithStorage(t)
-		pubKey := testRSAKey(t)
+		pubKey := &sharedRSAKey.PublicKey
 
 		_, err := srv.storage.Register(t.Context(), testCorrelationID, pubKey, "secret1", nil)
 		require.NoError(t, err)
@@ -446,7 +446,7 @@ func TestServeDefault(t *testing.T) {
 
 	t.Run("root_with_reflection_skips_banner", func(t *testing.T) {
 		srv := testServerWithStorage(t)
-		pubKey := testRSAKey(t)
+		pubKey := &sharedRSAKey.PublicKey
 		_, err := srv.storage.Register(t.Context(), testCorrelationID, pubKey, "secret", nil)
 		require.NoError(t, err)
 
@@ -606,7 +606,7 @@ func TestServeDefault(t *testing.T) {
 
 	t.Run("default_html_with_reflection", func(t *testing.T) {
 		srv := testServerWithStorage(t)
-		pubKey := testRSAKey(t)
+		pubKey := &sharedRSAKey.PublicKey
 		_, err := srv.storage.Register(t.Context(), testCorrelationID, pubKey, "secret", nil)
 		require.NoError(t, err)
 
@@ -639,7 +639,7 @@ func TestServeDefault(t *testing.T) {
 
 	t.Run("robots_txt_with_reflection", func(t *testing.T) {
 		srv := testServerWithStorage(t)
-		pubKey := testRSAKey(t)
+		pubKey := &sharedRSAKey.PublicKey
 		_, err := srv.storage.Register(t.Context(), testCorrelationID, pubKey, "secret", nil)
 		require.NoError(t, err)
 
@@ -732,7 +732,7 @@ func TestServeDefault(t *testing.T) {
 
 	t.Run("json_with_reflection", func(t *testing.T) {
 		srv := testServerWithStorage(t)
-		pubKey := testRSAKey(t)
+		pubKey := &sharedRSAKey.PublicKey
 		_, err := srv.storage.Register(t.Context(), testCorrelationID, pubKey, "secret", nil)
 		require.NoError(t, err)
 
@@ -833,7 +833,7 @@ func TestServeDefault(t *testing.T) {
 		srv := testServerWithStorage(t, func(c *Config) {
 			c.DynamicResp = true
 		})
-		pubKey := testRSAKey(t)
+		pubKey := &sharedRSAKey.PublicKey
 		_, err := srv.storage.Register(t.Context(), testCorrelationID, pubKey, "secret", &oobclient.ResponseConfig{
 			StatusCode: 302,
 			Headers:    []string{"Location: https://target.com"},
@@ -857,7 +857,7 @@ func TestServeDefault(t *testing.T) {
 			c.Token = testToken
 			c.DynamicResp = true
 		})
-		pubKey := testRSAKey(t)
+		pubKey := &sharedRSAKey.PublicKey
 		_, err := srv.storage.Register(t.Context(), testCorrelationID, pubKey, "secret", &oobclient.ResponseConfig{
 			StatusCode: 200,
 			Headers:    []string{"Content-Type: text/plain"},
@@ -880,7 +880,7 @@ func TestServeDefault(t *testing.T) {
 			c.Auth = true
 			c.Token = testToken
 		})
-		pubKey := testRSAKey(t)
+		pubKey := &sharedRSAKey.PublicKey
 		_, err := srv.storage.Register(t.Context(), testCorrelationID, pubKey, "secret", &oobclient.ResponseConfig{
 			StatusCode: 200,
 			Body:       "session body",
@@ -901,7 +901,7 @@ func TestServeDefault(t *testing.T) {
 		srv := testServerWithStorage(t, func(c *Config) {
 			c.DynamicResp = true
 		})
-		pubKey := testRSAKey(t)
+		pubKey := &sharedRSAKey.PublicKey
 		_, err := srv.storage.Register(t.Context(), testCorrelationID, pubKey, "secret", nil)
 		require.NoError(t, err)
 
@@ -918,7 +918,7 @@ func TestServeDefault(t *testing.T) {
 		srv := testServerWithStorage(t, func(c *Config) {
 			c.DynamicResp = true
 		})
-		pubKey := testRSAKey(t)
+		pubKey := &sharedRSAKey.PublicKey
 		_, err := srv.storage.Register(t.Context(), testCorrelationID, pubKey, "secret", nil)
 		require.NoError(t, err)
 
@@ -936,7 +936,7 @@ func TestServeDefault(t *testing.T) {
 		srv := testServerWithStorage(t, func(c *Config) {
 			c.DynamicResp = true
 		})
-		pubKey := testRSAKey(t)
+		pubKey := &sharedRSAKey.PublicKey
 		_, err := srv.storage.Register(t.Context(), testCorrelationID, pubKey, "secret", &oobclient.ResponseConfig{
 			StatusCode: 302,
 			Headers:    []string{"Location: target.com/path"},
@@ -956,7 +956,7 @@ func TestServeDefault(t *testing.T) {
 		srv := testServerWithStorage(t, func(c *Config) {
 			c.DynamicResp = true
 		})
-		pubKey := testRSAKey(t)
+		pubKey := &sharedRSAKey.PublicKey
 		_, err := srv.storage.Register(t.Context(), testCorrelationID, pubKey, "secret", &oobclient.ResponseConfig{
 			StatusCode: 307,
 			Headers:    []string{"Location: https://explicit.com"},
@@ -976,7 +976,7 @@ func TestServeDefault(t *testing.T) {
 		srv := testServerWithStorage(t, func(c *Config) {
 			c.DynamicResp = true
 		})
-		pubKey := testRSAKey(t)
+		pubKey := &sharedRSAKey.PublicKey
 		_, err := srv.storage.Register(t.Context(), testCorrelationID, pubKey, "secret", &oobclient.ResponseConfig{
 			StatusCode: 302,
 			Headers:    []string{"Location: target.com"},
@@ -995,7 +995,7 @@ func TestServeDefault(t *testing.T) {
 
 	t.Run("no_stored_response_fallthrough", func(t *testing.T) {
 		srv := testServerWithStorage(t)
-		pubKey := testRSAKey(t)
+		pubKey := &sharedRSAKey.PublicKey
 		_, err := srv.storage.Register(t.Context(), testCorrelationID, pubKey, "secret", nil)
 		require.NoError(t, err)
 
@@ -1011,7 +1011,7 @@ func TestServeDefault(t *testing.T) {
 		srv := testServerWithStorage(t, func(c *Config) {
 			c.DynamicResp = true
 		})
-		pubKey := testRSAKey(t)
+		pubKey := &sharedRSAKey.PublicKey
 		_, err := srv.storage.Register(t.Context(), testCorrelationID, pubKey, "secret", nil)
 		require.NoError(t, err)
 
@@ -1028,7 +1028,7 @@ func TestServeDefault(t *testing.T) {
 		srv := testServerWithStorage(t, func(c *Config) {
 			c.DynamicResp = true
 		})
-		pubKey := testRSAKey(t)
+		pubKey := &sharedRSAKey.PublicKey
 		_, err := srv.storage.Register(t.Context(), testCorrelationID, pubKey, "secret", nil)
 		require.NoError(t, err)
 
@@ -1046,7 +1046,7 @@ func TestServeDefault(t *testing.T) {
 		srv := testServerWithStorage(t, func(c *Config) {
 			c.DynamicResp = true
 		})
-		pubKey := testRSAKey(t)
+		pubKey := &sharedRSAKey.PublicKey
 		_, err := srv.storage.Register(t.Context(), testCorrelationID, pubKey, "secret", nil)
 		require.NoError(t, err)
 
@@ -1085,7 +1085,7 @@ func TestServeDefault(t *testing.T) {
 			c.Token = testToken
 			c.DynamicResp = true
 		})
-		pubKey := testRSAKey(t)
+		pubKey := &sharedRSAKey.PublicKey
 		_, err := srv.storage.Register(t.Context(), testCorrelationID, pubKey, "secret", &oobclient.ResponseConfig{
 			StatusCode: 200,
 			Headers:    []string{"Set-Cookie: a=1", "Set-Cookie: b=2"},
@@ -1110,7 +1110,7 @@ func TestServeDefault(t *testing.T) {
 			c.Auth = true
 			c.Token = testToken
 		})
-		pubKey := testRSAKey(t)
+		pubKey := &sharedRSAKey.PublicKey
 		_, err := srv.storage.Register(t.Context(), testCorrelationID, pubKey, "secret", nil)
 		require.NoError(t, err)
 
@@ -1129,7 +1129,7 @@ func TestServeDefault(t *testing.T) {
 			c.Auth = true
 			c.Token = testToken
 		})
-		pubKey := testRSAKey(t)
+		pubKey := &sharedRSAKey.PublicKey
 		_, err := srv.storage.Register(t.Context(), testCorrelationID, pubKey, "secret", nil)
 		require.NoError(t, err)
 
@@ -1149,7 +1149,7 @@ func TestServeDefault(t *testing.T) {
 			c.Auth = true
 			c.Token = testToken
 		})
-		pubKey := testRSAKey(t)
+		pubKey := &sharedRSAKey.PublicKey
 		_, err := srv.storage.Register(t.Context(), testCorrelationID, pubKey, "secret", nil)
 		require.NoError(t, err)
 
@@ -1168,7 +1168,7 @@ func TestServeDefault(t *testing.T) {
 			c.Auth = true
 			c.Token = testToken
 		})
-		pubKey := testRSAKey(t)
+		pubKey := &sharedRSAKey.PublicKey
 		_, err := srv.storage.Register(t.Context(), testCorrelationID, pubKey, "secret", nil)
 		require.NoError(t, err)
 

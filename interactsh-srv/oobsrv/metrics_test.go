@@ -39,7 +39,7 @@ func TestHandleMetrics(t *testing.T) {
 		srv := testServerWithStorage(t, func(c *Config) {
 			c.Metrics = true
 		})
-		key := testRSAKeyPair(t)
+		key := sharedRSAKey
 
 		// Register 3 sessions
 		ids := []string{
@@ -68,7 +68,7 @@ func TestHandleMetrics(t *testing.T) {
 		srv := testServerWithStorage(t, func(c *Config) {
 			c.Metrics = true
 		})
-		key := testRSAKeyPair(t)
+		key := sharedRSAKey
 		const id = "abcdefghij0123456789"
 
 		_, err := srv.storage.Register(t.Context(), id, &key.PublicKey, "secret", nil)
@@ -166,7 +166,7 @@ func TestHandleMetrics(t *testing.T) {
 		srv := testServerWithStorage(t, func(c *Config) {
 			c.Metrics = true
 		})
-		pubKey := testRSAKey(t)
+		pubKey := &sharedRSAKey.PublicKey
 
 		_, err := srv.storage.Register(t.Context(), testCorrelationID, pubKey, "secret", nil)
 		require.NoError(t, err)

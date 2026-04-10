@@ -829,13 +829,13 @@ func TestNew(t *testing.T) {
 	})
 
 	t.Run("context_cancellation", func(t *testing.T) {
-		// Server that delays response to allow cancellation to take effect
+		// Server that blocks until signalled so we can test context cancellation
+		unblock := make(chan struct{})
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			time.Sleep(2 * time.Second)
-			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write([]byte(`{"message":"registration successful"}`))
+			<-unblock
 		}))
 		t.Cleanup(server.Close)
+		t.Cleanup(func() { close(unblock) })
 
 		// Create a context that will be cancelled quickly
 		ctx, cancel := context.WithCancel(t.Context())

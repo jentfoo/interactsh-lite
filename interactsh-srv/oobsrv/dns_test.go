@@ -701,7 +701,7 @@ func TestDNSACMEChallenge(t *testing.T) {
 		srv.acmeStore.Set("_acme-challenge.test.com", "token")
 
 		// Register a session to check interaction storage
-		_, err := srv.storage.Register(t.Context(), testCorrelationID, &testRSAKeyPair(t).PublicKey, "secret", nil)
+		_, err := srv.storage.Register(t.Context(), testCorrelationID, &sharedRSAKey.PublicKey, "secret", nil)
 		require.NoError(t, err)
 
 		queryDNS(t, addr, "_acme-challenge.test.com", dns.TypeTXT)
@@ -822,7 +822,7 @@ func TestDNSMultiDomain(t *testing.T) {
 			s.cfg.Domains = []string{"sub.example.com", "example.com"}
 		})
 
-		key := testRSAKeyPair(t)
+		key := sharedRSAKey
 		aesKey, err := srv.storage.Register(t.Context(), testCorrelationID, &key.PublicKey, "secret", nil)
 		require.NoError(t, err)
 
@@ -863,7 +863,7 @@ func TestDNSInteractionCapture(t *testing.T) {
 
 	t.Run("correlation_id_extracted", func(t *testing.T) {
 		srv, addr := testDNSServer(t)
-		key := testRSAKeyPair(t)
+		key := sharedRSAKey
 		_, err := srv.storage.Register(t.Context(), testCorrelationID, &key.PublicKey, "secret", nil)
 		require.NoError(t, err)
 
@@ -877,7 +877,7 @@ func TestDNSInteractionCapture(t *testing.T) {
 
 	t.Run("correct_interaction_fields", func(t *testing.T) {
 		srv, addr := testDNSServer(t)
-		key := testRSAKeyPair(t)
+		key := sharedRSAKey
 		aesKey, err := srv.storage.Register(t.Context(), testCorrelationID, &key.PublicKey, "secret", nil)
 		require.NoError(t, err)
 
@@ -902,7 +902,7 @@ func TestDNSInteractionCapture(t *testing.T) {
 
 	t.Run("no_capture_non_configured", func(t *testing.T) {
 		srv, addr := testDNSServer(t)
-		key := testRSAKeyPair(t)
+		key := sharedRSAKey
 		_, err := srv.storage.Register(t.Context(), testCorrelationID, &key.PublicKey, "secret", nil)
 		require.NoError(t, err)
 
@@ -915,7 +915,7 @@ func TestDNSInteractionCapture(t *testing.T) {
 
 	t.Run("remote_addr_without_port", func(t *testing.T) {
 		srv, _ := testDNSServer(t)
-		key := testRSAKeyPair(t)
+		key := sharedRSAKey
 		aesKey, err := srv.storage.Register(t.Context(), testCorrelationID, &key.PublicKey, "secret", nil)
 		require.NoError(t, err)
 
@@ -943,7 +943,7 @@ func TestDNSInteractionCapture(t *testing.T) {
 				"test.com": NewSharedBucket(s.cfg.MaxSharedInteractions, 24*time.Hour),
 			}
 		})
-		key := testRSAKeyPair(t)
+		key := sharedRSAKey
 		_, err := srv.storage.Register(t.Context(), testCorrelationID, &key.PublicKey, "secret", nil)
 		require.NoError(t, err)
 
@@ -970,7 +970,7 @@ func TestDNSScanEverywhere(t *testing.T) {
 	srv, addr := testDNSServer(t, func(s *Server) {
 		s.cfg.ScanEverywhere = true
 	})
-	key := testRSAKeyPair(t)
+	key := sharedRSAKey
 	_, err := srv.storage.Register(t.Context(), testCorrelationID, &key.PublicKey, "secret", nil)
 	require.NoError(t, err)
 
