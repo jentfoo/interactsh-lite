@@ -5,13 +5,16 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+
+	"github.com/go-appsec/interactsh-lite/oobclient"
 )
 
 // registerRequest is the POST /register JSON body.
 type registerRequest struct {
-	PublicKey     string `json:"public-key"`
-	SecretKey     string `json:"secret-key"`
-	CorrelationID string `json:"correlation-id"`
+	PublicKey     string                    `json:"public-key"`
+	SecretKey     string                    `json:"secret-key"`
+	CorrelationID string                    `json:"correlation-id"`
+	Response      *oobclient.ResponseConfig `json:"response,omitempty"`
 }
 
 // deregisterRequest is the POST /deregister JSON body.
@@ -82,7 +85,21 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_, err = s.storage.Register(r.Context(), req.CorrelationID, pubKey, req.SecretKey)
+	if req.Response != nil {
+		if !s.cfg.DynamicResp {
+			s.writeJSON(w, http.StatusBadRequest, map[string]string{
+				"error": "server does not support response configuration (--dynamic-resp not enabled)",
+			})
+			return
+		} else if !s.cfg.Auth && !req.Response.IsAllowedUnauthenticated() {
+			s.writeJSON(w, http.StatusBadRequest, map[string]string{
+				"error": "unauthenticated servers only allow 302/307 redirects with a Location header",
+			})
+			return
+		}
+	}
+
+	_, err = s.storage.Register(r.Context(), req.CorrelationID, pubKey, req.SecretKey, req.Response)
 	if err != nil {
 		s.writeJSON(w, http.StatusBadRequest, map[string]string{
 			"error": err.Error(),

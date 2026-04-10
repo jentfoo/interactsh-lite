@@ -161,7 +161,7 @@ func TestLiteIntegration_http_interaction(t *testing.T) {
 	req.Host = payloadHost
 	resp, err := http.DefaultClient.Do(req)
 	require.NoError(t, err)
-	_ = resp.Body.Close()
+	require.NoError(t, resp.Body.Close())
 
 	interactions := collectInteractions(t, client, 1, 5*time.Second)
 	require.Len(t, interactions, 1)
@@ -265,7 +265,7 @@ func TestLiteIntegration_ftp_interaction(t *testing.T) {
 
 	tp := ftpDial(t, ftpAddr)
 	ftpLogin(t, tp, "alice", "secret")
-	_ = tp.Close()
+	require.NoError(t, tp.Close())
 
 	// FTP interactions go to extra bucket (plaintext)
 	interactions := collectInteractions(t, client, 1, 5*time.Second)
@@ -381,7 +381,7 @@ func TestLiteIntegration_wildcard_tlddata(t *testing.T) {
 	req.Host = "anything." + testDomain
 	resp, err := http.DefaultClient.Do(req)
 	require.NoError(t, err)
-	_ = resp.Body.Close()
+	require.NoError(t, resp.Body.Close())
 
 	// client receives wildcard interaction via tlddata
 	interactions := collectInteractions(t, client, 1, 5*time.Second)
@@ -416,7 +416,7 @@ func TestLiteIntegration_ftp_extra_shared(t *testing.T) {
 
 	tp := ftpDial(t, ftpAddr)
 	ftpLogin(t, tp, "shared", "user")
-	_ = tp.Close()
+	require.NoError(t, tp.Close())
 
 	// both clients should receive the FTP interaction (shared extra bucket)
 	i1 := collectInteractions(t, client1, 1, 5*time.Second)

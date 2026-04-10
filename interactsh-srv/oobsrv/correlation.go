@@ -151,19 +151,6 @@ func matchesContain(matches []Match, id string) bool {
 	return slices.ContainsFunc(matches, func(m Match) bool { return m.UniqueID == id })
 }
 
-// ReflectURL finds a correlation ID in host and returns the reversed label, or "".
-func ReflectURL(host string, cidLength int, lookup func(string) bool) string {
-	host = strings.ToLower(host)
-	var result string
-
-	scanLabels(host, cidLength, lookup, func(_, label string) bool {
-		result = reverseString(label)
-		return false // stop on first match
-	})
-
-	return result
-}
-
 // extractFullID strips the domain suffix from input. Domains must be pre-sorted longest-first.
 func extractFullID(input string, domains []string) string {
 	for _, domain := range domains {

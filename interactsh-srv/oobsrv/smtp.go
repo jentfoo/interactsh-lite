@@ -59,7 +59,7 @@ func (l *teeListener) Accept() (net.Conn, error) {
 // extractRawPath extracts the mailbox path from a raw SMTP parameter string
 // (the text after "MAIL FROM:" or "RCPT TO:"). It finds the content between
 // the outermost angle brackets, handling quoted strings that may contain '>'.
-// Returns empty string on failure — caller should use the parsed fallback.
+// Returns empty string on failure, in which case the caller uses the parsed fallback.
 func extractRawPath(param string) string {
 	param = strings.TrimSpace(param)
 	if strings.HasPrefix(param, "<>") {

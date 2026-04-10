@@ -21,6 +21,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/go-appsec/interactsh-lite/oobclient"
 	"github.com/syndtr/goleveldb/leveldb"
 	leveldberrors "github.com/syndtr/goleveldb/leveldb/errors"
 )
@@ -29,11 +30,15 @@ import (
 type Storage interface {
 	// Register stores a new session and returns its AES key. Matching secret
 	// on duplicate returns existing key (keep-alive); mismatched secret errors.
-	Register(ctx context.Context, correlationID string, publicKey *rsa.PublicKey, secretKey string) (aesKey []byte, err error)
+	// The response is stored on initial registration and ignored on keep-alive.
+	Register(ctx context.Context, correlationID string, publicKey *rsa.PublicKey, secretKey string, response *oobclient.ResponseConfig) (aesKey []byte, err error)
 
 	// GetSession validates credentials and returns a handle for accessing
 	// session data and draining interactions.
 	GetSession(correlationID, secretKey string) (SessionHandle, error)
+
+	// GetResponse returns the stored response config for a correlation ID, or nil.
+	GetResponse(correlationID string) *oobclient.ResponseConfig
 
 	// AppendInteraction adds an encrypted interaction to a session.
 	AppendInteraction(correlationID string, interaction []byte) error
@@ -68,6 +73,7 @@ type Session struct {
 	AESKey    []byte
 	AESBlock  cipher.Block // cached from aes.NewCipher(AESKey)
 	SecretKey []byte
+	Response  *oobclient.ResponseConfig // nil = no configured response
 
 	mu           sync.Mutex
 	interactions [][]byte
@@ -202,14 +208,14 @@ func (m *memoryStorage) promoteLRU(correlationID string) {
 	}
 }
 
-func (m *memoryStorage) Register(ctx context.Context, correlationID string, publicKey *rsa.PublicKey, secretKey string) ([]byte, error) {
-	key, _, err := m.registerInternal(ctx, correlationID, publicKey, secretKey)
+func (m *memoryStorage) Register(ctx context.Context, correlationID string, publicKey *rsa.PublicKey, secretKey string, response *oobclient.ResponseConfig) ([]byte, error) {
+	key, _, err := m.registerInternal(ctx, correlationID, publicKey, secretKey, response)
 	return key, err
 }
 
 // registerInternal performs registration and reports whether it was a new
 // session (true) or a keep-alive for an existing session (false).
-func (m *memoryStorage) registerInternal(_ context.Context, correlationID string, publicKey *rsa.PublicKey, secretKey string) ([]byte, bool, error) {
+func (m *memoryStorage) registerInternal(_ context.Context, correlationID string, publicKey *rsa.PublicKey, secretKey string, response *oobclient.ResponseConfig) ([]byte, bool, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -251,6 +257,7 @@ func (m *memoryStorage) registerInternal(_ context.Context, correlationID string
 		AESKey:    aesKey,
 		AESBlock:  aesBlock,
 		SecretKey: []byte(secretKey),
+		Response:  response,
 		createdAt: now,
 	}
 	session.lastAccess.Store(now.UnixNano())
@@ -430,6 +437,21 @@ func (m *memoryStorage) HasCorrelationID(correlationID string) bool {
 	}
 	m.mu.Unlock()
 	return ok
+}
+
+func (m *memoryStorage) GetResponse(correlationID string) *oobclient.ResponseConfig {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	session, ok := m.sessions[correlationID]
+	if !ok {
+		return nil
+	}
+
+	if expired := m.isExpired(session); expired {
+		return nil
+	}
+	return session.Response
 }
 
 func (m *memoryStorage) HitCount() uint64      { return m.hits.Load() }

@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/go-appsec/interactsh-lite/oobclient"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -74,6 +75,16 @@ const (
 	testListenIP = "127.0.0.1"
 )
 
+// registerTestSession registers a session for testCorrelationID so that
+// scanLabels can match it in the request host.
+func registerTestSession(t *testing.T, srv *Server) string {
+	t.Helper()
+	pubKey := testRSAKey(t)
+	_, err := srv.storage.Register(t.Context(), testCorrelationID, pubKey, "secret", nil)
+	require.NoError(t, err)
+	return testCorrelationID
+}
+
 func TestOnHTTPInteraction(t *testing.T) {
 	t.Parallel()
 
@@ -90,7 +101,7 @@ func TestOnHTTPInteraction(t *testing.T) {
 	t.Run("unconfigured_domain", func(t *testing.T) {
 		srv := testServerWithStorage(t)
 		pubKey := testRSAKey(t)
-		_, err := srv.storage.Register(t.Context(), testCorrelationID, pubKey, "secret")
+		_, err := srv.storage.Register(t.Context(), testCorrelationID, pubKey, "secret", nil)
 		require.NoError(t, err)
 
 		req := httptest.NewRequest(http.MethodGet, "/", nil)
@@ -106,7 +117,7 @@ func TestOnHTTPInteraction(t *testing.T) {
 	t.Run("stores_correlation_match", func(t *testing.T) {
 		srv := testServerWithStorage(t)
 		pubKey := testRSAKey(t)
-		aesKey, err := srv.storage.Register(t.Context(), testCorrelationID, pubKey, "secret")
+		aesKey, err := srv.storage.Register(t.Context(), testCorrelationID, pubKey, "secret", nil)
 		require.NoError(t, err)
 
 		host := testCorrelationID + testNonce + ".test.com"
@@ -138,7 +149,7 @@ func TestOnHTTPInteraction(t *testing.T) {
 	t.Run("protocol_https", func(t *testing.T) {
 		srv := testServerWithStorage(t)
 		pubKey := testRSAKey(t)
-		aesKey, err := srv.storage.Register(t.Context(), testCorrelationID, pubKey, "secret")
+		aesKey, err := srv.storage.Register(t.Context(), testCorrelationID, pubKey, "secret", nil)
 		require.NoError(t, err)
 
 		host := testCorrelationID + testNonce + ".test.com"
@@ -191,7 +202,7 @@ func TestOnHTTPInteraction(t *testing.T) {
 			c.ScanEverywhere = true
 		})
 		pubKey := testRSAKey(t)
-		aesKey, err := srv.storage.Register(t.Context(), testCorrelationID, pubKey, "secret")
+		aesKey, err := srv.storage.Register(t.Context(), testCorrelationID, pubKey, "secret", nil)
 		require.NoError(t, err)
 
 		// CID appears in request body, not the host
@@ -217,7 +228,7 @@ func TestOnHTTPInteraction(t *testing.T) {
 			c.ScanEverywhere = true
 		})
 		pubKey := testRSAKey(t)
-		aesKey, err := srv.storage.Register(t.Context(), testCorrelationID, pubKey, "secret")
+		aesKey, err := srv.storage.Register(t.Context(), testCorrelationID, pubKey, "secret", nil)
 		require.NoError(t, err)
 
 		// Host does not match any configured domain, but CID is in raw request
@@ -241,7 +252,7 @@ func TestOnHTTPInteraction(t *testing.T) {
 	t.Run("host_with_port", func(t *testing.T) {
 		srv := testServerWithStorage(t)
 		pubKey := testRSAKey(t)
-		_, err := srv.storage.Register(t.Context(), testCorrelationID, pubKey, "secret")
+		_, err := srv.storage.Register(t.Context(), testCorrelationID, pubKey, "secret", nil)
 		require.NoError(t, err)
 
 		req := httptest.NewRequest(http.MethodGet, "/", nil)
@@ -259,9 +270,9 @@ func TestOnHTTPInteraction(t *testing.T) {
 		srv := testServerWithStorage(t)
 		pubKey := testRSAKey(t)
 
-		_, err := srv.storage.Register(t.Context(), testCorrelationID, pubKey, "secret1")
+		_, err := srv.storage.Register(t.Context(), testCorrelationID, pubKey, "secret1", nil)
 		require.NoError(t, err)
-		_, err = srv.storage.Register(t.Context(), testCorrelationID2, pubKey, "secret2")
+		_, err = srv.storage.Register(t.Context(), testCorrelationID2, pubKey, "secret2", nil)
 		require.NoError(t, err)
 
 		// Two CIDs as separate labels in hostname
@@ -273,11 +284,13 @@ func TestOnHTTPInteraction(t *testing.T) {
 
 		// Interaction recording is async; wait for each independently
 		require.Eventually(t, func() bool {
-			i, _ := testGetAndClearInteractions(t, srv.storage, testCorrelationID, "secret1")
+			i, err := testGetAndClearInteractions(t, srv.storage, testCorrelationID, "secret1")
+			require.NoError(t, err)
 			return len(i) == 1
 		}, time.Second, 5*time.Millisecond)
 		require.Eventually(t, func() bool {
-			i, _ := testGetAndClearInteractions(t, srv.storage, testCorrelationID2, "secret2")
+			i, err := testGetAndClearInteractions(t, srv.storage, testCorrelationID2, "secret2")
+			require.NoError(t, err)
 			return len(i) == 1
 		}, time.Second, 5*time.Millisecond)
 	})
@@ -434,7 +447,7 @@ func TestServeDefault(t *testing.T) {
 	t.Run("root_with_reflection_skips_banner", func(t *testing.T) {
 		srv := testServerWithStorage(t)
 		pubKey := testRSAKey(t)
-		_, err := srv.storage.Register(t.Context(), testCorrelationID, pubKey, "secret")
+		_, err := srv.storage.Register(t.Context(), testCorrelationID, pubKey, "secret", nil)
 		require.NoError(t, err)
 
 		rec := httptest.NewRecorder()
@@ -464,11 +477,15 @@ func TestServeDefault(t *testing.T) {
 	t.Run("dynamic_body", func(t *testing.T) {
 		srv := testServerWithStorage(t, func(c *Config) {
 			c.DynamicResp = true
+			c.Auth = true
+			c.Token = testToken
 		})
+		cid := registerTestSession(t, srv)
+		host := cid + testNonce + "." + testDomain
 
 		rec := httptest.NewRecorder()
 		req := httptest.NewRequest(http.MethodGet, "/test?body=hello+world", nil)
-		req.Host = testDomain
+		req.Host = host
 
 		srv.serveDefault(rec, req)
 
@@ -478,12 +495,16 @@ func TestServeDefault(t *testing.T) {
 	t.Run("dynamic_b64_body", func(t *testing.T) {
 		srv := testServerWithStorage(t, func(c *Config) {
 			c.DynamicResp = true
+			c.Auth = true
+			c.Token = testToken
 		})
+		cid := registerTestSession(t, srv)
+		host := cid + testNonce + "." + testDomain
 
 		encoded := base64.StdEncoding.EncodeToString([]byte("decoded content"))
 		rec := httptest.NewRecorder()
 		req := httptest.NewRequest(http.MethodGet, "/test?b64_body="+encoded, nil)
-		req.Host = testDomain
+		req.Host = host
 
 		srv.serveDefault(rec, req)
 
@@ -493,12 +514,16 @@ func TestServeDefault(t *testing.T) {
 	t.Run("dynamic_b64_path", func(t *testing.T) {
 		srv := testServerWithStorage(t, func(c *Config) {
 			c.DynamicResp = true
+			c.Auth = true
+			c.Token = testToken
 		})
+		cid := registerTestSession(t, srv)
+		host := cid + testNonce + "." + testDomain
 
 		encoded := base64.StdEncoding.EncodeToString([]byte("path body"))
 		rec := httptest.NewRecorder()
 		req := httptest.NewRequest(http.MethodGet, "/b64_body:"+encoded+"/", nil)
-		req.Host = testDomain
+		req.Host = host
 
 		srv.serveDefault(rec, req)
 
@@ -508,11 +533,15 @@ func TestServeDefault(t *testing.T) {
 	t.Run("dynamic_header", func(t *testing.T) {
 		srv := testServerWithStorage(t, func(c *Config) {
 			c.DynamicResp = true
+			c.Auth = true
+			c.Token = testToken
 		})
+		cid := registerTestSession(t, srv)
+		host := cid + testNonce + "." + testDomain
 
 		rec := httptest.NewRecorder()
 		req := httptest.NewRequest(http.MethodGet, "/test?header=X-Foo:bar&body=ok", nil)
-		req.Host = testDomain
+		req.Host = host
 
 		srv.serveDefault(rec, req)
 
@@ -522,19 +551,23 @@ func TestServeDefault(t *testing.T) {
 	t.Run("dynamic_status", func(t *testing.T) {
 		srv := testServerWithStorage(t, func(c *Config) {
 			c.DynamicResp = true
+			c.Auth = true
+			c.Token = testToken
 		})
+		cid := registerTestSession(t, srv)
+		host := cid + testNonce + "." + testDomain
 
 		// Valid status code
 		rec := httptest.NewRecorder()
 		req := httptest.NewRequest(http.MethodGet, "/test?status=201&body=created", nil)
-		req.Host = testDomain
+		req.Host = host
 		srv.serveDefault(rec, req)
 		assert.Equal(t, 201, rec.Code)
 
 		// Invalid status code falls back to 200
 		rec = httptest.NewRecorder()
 		req = httptest.NewRequest(http.MethodGet, "/test?status=abc&body=ok", nil)
-		req.Host = testDomain
+		req.Host = host
 		srv.serveDefault(rec, req)
 		assert.Equal(t, http.StatusOK, rec.Code)
 	})
@@ -542,11 +575,14 @@ func TestServeDefault(t *testing.T) {
 	t.Run("dynamic_invalid_b64", func(t *testing.T) {
 		srv := testServerWithStorage(t, func(c *Config) {
 			c.DynamicResp = true
+			c.Auth = true
+			c.Token = testToken
 		})
+		cid := registerTestSession(t, srv)
 
 		rec := httptest.NewRecorder()
 		req := httptest.NewRequest(http.MethodGet, "/test?b64_body=!!invalid!!", nil)
-		req.Host = testDomain
+		req.Host = cid + testNonce + "." + testDomain
 
 		srv.serveDefault(rec, req)
 
@@ -564,14 +600,14 @@ func TestServeDefault(t *testing.T) {
 
 		srv.serveDefault(rec, req)
 
-		assert.Contains(t, rec.Body.String(), "<html>")
+		assert.Contains(t, rec.Body.String(), "Interactsh-lite Server")
 		assert.NotContains(t, rec.Body.String(), "should-not-appear")
 	})
 
 	t.Run("default_html_with_reflection", func(t *testing.T) {
 		srv := testServerWithStorage(t)
 		pubKey := testRSAKey(t)
-		_, err := srv.storage.Register(t.Context(), testCorrelationID, pubKey, "secret")
+		_, err := srv.storage.Register(t.Context(), testCorrelationID, pubKey, "secret", nil)
 		require.NoError(t, err)
 
 		rec := httptest.NewRecorder()
@@ -597,14 +633,14 @@ func TestServeDefault(t *testing.T) {
 
 		srv.serveDefault(rec, req)
 
-		assert.Equal(t, "<html><head></head><body></body></html>", rec.Body.String())
+		assert.Contains(t, rec.Body.String(), "Interactsh-lite Server")
 		assert.Contains(t, rec.Header().Get("Content-Type"), "text/html")
 	})
 
 	t.Run("robots_txt_with_reflection", func(t *testing.T) {
 		srv := testServerWithStorage(t)
 		pubKey := testRSAKey(t)
-		_, err := srv.storage.Register(t.Context(), testCorrelationID, pubKey, "secret")
+		_, err := srv.storage.Register(t.Context(), testCorrelationID, pubKey, "secret", nil)
 		require.NoError(t, err)
 
 		rec := httptest.NewRecorder()
@@ -624,11 +660,15 @@ func TestServeDefault(t *testing.T) {
 	t.Run("multiple_header_params", func(t *testing.T) {
 		srv := testServerWithStorage(t, func(c *Config) {
 			c.DynamicResp = true
+			c.Auth = true
+			c.Token = testToken
 		})
+		cid := registerTestSession(t, srv)
+		host := cid + testNonce + "." + testDomain
 
 		rec := httptest.NewRecorder()
 		req := httptest.NewRequest(http.MethodGet, "/test?header=X-A:1&header=X-B:2&body=ok", nil)
-		req.Host = testDomain
+		req.Host = host
 
 		srv.serveDefault(rec, req)
 
@@ -639,11 +679,14 @@ func TestServeDefault(t *testing.T) {
 	t.Run("malformed_header_ignored", func(t *testing.T) {
 		srv := testServerWithStorage(t, func(c *Config) {
 			c.DynamicResp = true
+			c.Auth = true
+			c.Token = testToken
 		})
+		cid := registerTestSession(t, srv)
 
 		rec := httptest.NewRecorder()
 		req := httptest.NewRequest(http.MethodGet, "/test?header=nocolon&header=X-Good:ok&body=x", nil)
-		req.Host = testDomain
+		req.Host = cid + testNonce + "." + testDomain
 
 		srv.serveDefault(rec, req)
 
@@ -654,12 +697,16 @@ func TestServeDefault(t *testing.T) {
 	t.Run("path_body_priority_over_query", func(t *testing.T) {
 		srv := testServerWithStorage(t, func(c *Config) {
 			c.DynamicResp = true
+			c.Auth = true
+			c.Token = testToken
 		})
+		cid := registerTestSession(t, srv)
+		host := cid + testNonce + "." + testDomain
 
 		encoded := base64.StdEncoding.EncodeToString([]byte("path wins"))
 		rec := httptest.NewRecorder()
 		req := httptest.NewRequest(http.MethodGet, "/b64_body:"+encoded+"/?body=query+loses", nil)
-		req.Host = testDomain
+		req.Host = host
 
 		srv.serveDefault(rec, req)
 
@@ -669,11 +716,14 @@ func TestServeDefault(t *testing.T) {
 	t.Run("invalid_b64_path_falls_through", func(t *testing.T) {
 		srv := testServerWithStorage(t, func(c *Config) {
 			c.DynamicResp = true
+			c.Auth = true
+			c.Token = testToken
 		})
+		cid := registerTestSession(t, srv)
 
 		rec := httptest.NewRecorder()
 		req := httptest.NewRequest(http.MethodGet, "/b64_body:!!!invalid/?body=fallback", nil)
-		req.Host = testDomain
+		req.Host = cid + testNonce + "." + testDomain
 
 		srv.serveDefault(rec, req)
 
@@ -683,7 +733,7 @@ func TestServeDefault(t *testing.T) {
 	t.Run("json_with_reflection", func(t *testing.T) {
 		srv := testServerWithStorage(t)
 		pubKey := testRSAKey(t)
-		_, err := srv.storage.Register(t.Context(), testCorrelationID, pubKey, "secret")
+		_, err := srv.storage.Register(t.Context(), testCorrelationID, pubKey, "secret", nil)
 		require.NoError(t, err)
 
 		rec := httptest.NewRecorder()
@@ -714,6 +764,8 @@ func TestServeDefault(t *testing.T) {
 	t.Run("content_type_ignores_dynamic_params", func(t *testing.T) {
 		srv := testServerWithStorage(t, func(c *Config) {
 			c.DynamicResp = true
+			c.Auth = true
+			c.Token = testToken
 		})
 
 		rec := httptest.NewRecorder()
@@ -730,11 +782,14 @@ func TestServeDefault(t *testing.T) {
 	t.Run("dynamic_delay_zero", func(t *testing.T) {
 		srv := testServerWithStorage(t, func(c *Config) {
 			c.DynamicResp = true
+			c.Auth = true
+			c.Token = testToken
 		})
+		cid := registerTestSession(t, srv)
 
 		rec := httptest.NewRecorder()
 		req := httptest.NewRequest(http.MethodGet, "/test?delay=0&body=delayed", nil)
-		req.Host = testDomain
+		req.Host = cid + testNonce + "." + testDomain
 
 		srv.serveDefault(rec, req)
 
@@ -772,5 +827,357 @@ func TestServeDefault(t *testing.T) {
 
 		assert.Equal(t, http.StatusOK, rec.Code)
 		assert.Equal(t, "secret-content", rec.Body.String())
+	})
+
+	t.Run("session_stored_redirect", func(t *testing.T) {
+		srv := testServerWithStorage(t, func(c *Config) {
+			c.DynamicResp = true
+		})
+		pubKey := testRSAKey(t)
+		_, err := srv.storage.Register(t.Context(), testCorrelationID, pubKey, "secret", &oobclient.ResponseConfig{
+			StatusCode: 302,
+			Headers:    []string{"Location: https://target.com"},
+		})
+		require.NoError(t, err)
+
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req.Host = testCorrelationID + testNonce + ".test.com"
+		srv.serveDefault(rec, req)
+
+		assert.Equal(t, 302, rec.Code)
+		assert.Equal(t, "https://target.com", rec.Header().Get("Location"))
+		// Body should contain the reversed label (reflection)
+		assert.Contains(t, rec.Body.String(), reverseString(testCorrelationID+testNonce))
+	})
+
+	t.Run("session_stored_with_body", func(t *testing.T) {
+		srv := testServerWithStorage(t, func(c *Config) {
+			c.Auth = true
+			c.Token = testToken
+			c.DynamicResp = true
+		})
+		pubKey := testRSAKey(t)
+		_, err := srv.storage.Register(t.Context(), testCorrelationID, pubKey, "secret", &oobclient.ResponseConfig{
+			StatusCode: 200,
+			Headers:    []string{"Content-Type: text/plain"},
+			Body:       "custom body",
+		})
+		require.NoError(t, err)
+
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/somepath", nil)
+		req.Host = testCorrelationID + testNonce + ".test.com"
+		srv.serveDefault(rec, req)
+
+		assert.Equal(t, 200, rec.Code)
+		assert.Equal(t, "custom body", rec.Body.String())
+	})
+
+	t.Run("param_takes_precedence", func(t *testing.T) {
+		srv := testServerWithStorage(t, func(c *Config) {
+			c.DynamicResp = true
+			c.Auth = true
+			c.Token = testToken
+		})
+		pubKey := testRSAKey(t)
+		_, err := srv.storage.Register(t.Context(), testCorrelationID, pubKey, "secret", &oobclient.ResponseConfig{
+			StatusCode: 200,
+			Body:       "session body",
+		})
+		require.NoError(t, err)
+
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/?status=201&header=X-Source:param&body=param+body", nil)
+		req.Host = testCorrelationID + testNonce + ".test.com"
+		srv.serveDefault(rec, req)
+
+		assert.Equal(t, 201, rec.Code)
+		assert.Equal(t, "param", rec.Header().Get("X-Source"))
+		assert.Equal(t, "param body", rec.Body.String())
+	})
+
+	t.Run("param_unauth_redirect_allowed", func(t *testing.T) {
+		srv := testServerWithStorage(t, func(c *Config) {
+			c.DynamicResp = true
+		})
+		pubKey := testRSAKey(t)
+		_, err := srv.storage.Register(t.Context(), testCorrelationID, pubKey, "secret", nil)
+		require.NoError(t, err)
+
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/?status=302&header=Location:https://target.com", nil)
+		req.Host = testCorrelationID + testNonce + ".test.com"
+		srv.serveDefault(rec, req)
+
+		assert.Equal(t, 302, rec.Code)
+		assert.Equal(t, "https://target.com", rec.Header().Get("Location"))
+	})
+
+	t.Run("param_unauth_non_redirect_rejected", func(t *testing.T) {
+		srv := testServerWithStorage(t, func(c *Config) {
+			c.DynamicResp = true
+		})
+		pubKey := testRSAKey(t)
+		_, err := srv.storage.Register(t.Context(), testCorrelationID, pubKey, "secret", nil)
+		require.NoError(t, err)
+
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/test?status=200&header=Content-Type:text/plain&body=hello", nil)
+		req.Host = testCorrelationID + testNonce + ".test.com"
+		srv.serveDefault(rec, req)
+
+		// Falls through to HTML fallback, dynamic params not served
+		assert.Contains(t, rec.Body.String(), "<html>")
+		assert.NotContains(t, rec.Body.String(), "hello")
+	})
+
+	t.Run("scheme_no_scheme_http", func(t *testing.T) {
+		srv := testServerWithStorage(t, func(c *Config) {
+			c.DynamicResp = true
+		})
+		pubKey := testRSAKey(t)
+		_, err := srv.storage.Register(t.Context(), testCorrelationID, pubKey, "secret", &oobclient.ResponseConfig{
+			StatusCode: 302,
+			Headers:    []string{"Location: target.com/path"},
+		})
+		require.NoError(t, err)
+
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req.Host = testCorrelationID + testNonce + ".test.com"
+		srv.serveDefault(rec, req)
+
+		assert.Equal(t, 302, rec.Code)
+		assert.Equal(t, "http://target.com/path", rec.Header().Get("Location"))
+	})
+
+	t.Run("scheme_explicit_https_preserved", func(t *testing.T) {
+		srv := testServerWithStorage(t, func(c *Config) {
+			c.DynamicResp = true
+		})
+		pubKey := testRSAKey(t)
+		_, err := srv.storage.Register(t.Context(), testCorrelationID, pubKey, "secret", &oobclient.ResponseConfig{
+			StatusCode: 307,
+			Headers:    []string{"Location: https://explicit.com"},
+		})
+		require.NoError(t, err)
+
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req.Host = testCorrelationID + testNonce + ".test.com"
+		srv.serveDefault(rec, req)
+
+		assert.Equal(t, 307, rec.Code)
+		assert.Equal(t, "https://explicit.com", rec.Header().Get("Location"))
+	})
+
+	t.Run("scheme_tls_request", func(t *testing.T) {
+		srv := testServerWithStorage(t, func(c *Config) {
+			c.DynamicResp = true
+		})
+		pubKey := testRSAKey(t)
+		_, err := srv.storage.Register(t.Context(), testCorrelationID, pubKey, "secret", &oobclient.ResponseConfig{
+			StatusCode: 302,
+			Headers:    []string{"Location: target.com"},
+		})
+		require.NoError(t, err)
+
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req.Host = testCorrelationID + testNonce + ".test.com"
+		req.TLS = &tls.ConnectionState{}
+		srv.serveDefault(rec, req)
+
+		assert.Equal(t, 302, rec.Code)
+		assert.Equal(t, "https://target.com", rec.Header().Get("Location"))
+	})
+
+	t.Run("no_stored_response_fallthrough", func(t *testing.T) {
+		srv := testServerWithStorage(t)
+		pubKey := testRSAKey(t)
+		_, err := srv.storage.Register(t.Context(), testCorrelationID, pubKey, "secret", nil)
+		require.NoError(t, err)
+
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/somepath", nil)
+		req.Host = testCorrelationID + testNonce + ".test.com"
+		srv.serveDefault(rec, req)
+
+		assert.Contains(t, rec.Body.String(), "<html>")
+	})
+
+	t.Run("param_unauth_redirect_body_rejected", func(t *testing.T) {
+		srv := testServerWithStorage(t, func(c *Config) {
+			c.DynamicResp = true
+		})
+		pubKey := testRSAKey(t)
+		_, err := srv.storage.Register(t.Context(), testCorrelationID, pubKey, "secret", nil)
+		require.NoError(t, err)
+
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/?status=302&header=Location:https://target.com&body=evil", nil)
+		req.Host = testCorrelationID + testNonce + ".test.com"
+		srv.serveDefault(rec, req)
+
+		assert.Contains(t, rec.Body.String(), "<html>")
+		assert.NotContains(t, rec.Body.String(), "evil")
+	})
+
+	t.Run("param_unauth_redirect_b64body_rejected", func(t *testing.T) {
+		srv := testServerWithStorage(t, func(c *Config) {
+			c.DynamicResp = true
+		})
+		pubKey := testRSAKey(t)
+		_, err := srv.storage.Register(t.Context(), testCorrelationID, pubKey, "secret", nil)
+		require.NoError(t, err)
+
+		encoded := base64.StdEncoding.EncodeToString([]byte("evil"))
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/?status=302&header=Location:https://target.com&b64_body="+encoded, nil)
+		req.Host = testCorrelationID + testNonce + ".test.com"
+		srv.serveDefault(rec, req)
+
+		assert.Contains(t, rec.Body.String(), "<html>")
+		assert.NotContains(t, rec.Body.String(), "evil")
+	})
+
+	t.Run("param_unauth_delay_only", func(t *testing.T) {
+		srv := testServerWithStorage(t, func(c *Config) {
+			c.DynamicResp = true
+		})
+		pubKey := testRSAKey(t)
+		_, err := srv.storage.Register(t.Context(), testCorrelationID, pubKey, "secret", nil)
+		require.NoError(t, err)
+
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/?delay=0", nil)
+		req.Host = testCorrelationID + testNonce + ".test.com"
+		srv.serveDefault(rec, req)
+
+		reversed := reverseString(testCorrelationID + testNonce)
+		assert.Equal(t, http.StatusOK, rec.Code)
+		assert.Equal(t, reversed, rec.Body.String())
+	})
+
+	t.Run("duplicate_headers_preserved", func(t *testing.T) {
+		srv := testServerWithStorage(t, func(c *Config) {
+			c.DynamicResp = true
+			c.Auth = true
+			c.Token = testToken
+		})
+		cid := registerTestSession(t, srv)
+
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/test?header=Set-Cookie:a=1&header=Set-Cookie:b=2&body=ok", nil)
+		req.Host = cid + testNonce + "." + testDomain
+		srv.serveDefault(rec, req)
+
+		cookies := rec.Header().Values("Set-Cookie")
+		assert.Len(t, cookies, 2)
+		assert.Contains(t, cookies, "a=1")
+		assert.Contains(t, cookies, "b=2")
+	})
+
+	t.Run("stored_duplicate_headers", func(t *testing.T) {
+		srv := testServerWithStorage(t, func(c *Config) {
+			c.Auth = true
+			c.Token = testToken
+			c.DynamicResp = true
+		})
+		pubKey := testRSAKey(t)
+		_, err := srv.storage.Register(t.Context(), testCorrelationID, pubKey, "secret", &oobclient.ResponseConfig{
+			StatusCode: 200,
+			Headers:    []string{"Set-Cookie: a=1", "Set-Cookie: b=2"},
+			Body:       "ok",
+		})
+		require.NoError(t, err)
+
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req.Host = testCorrelationID + testNonce + ".test.com"
+		srv.serveDefault(rec, req)
+
+		cookies := rec.Header().Values("Set-Cookie")
+		assert.Len(t, cookies, 2)
+		assert.Contains(t, cookies, "a=1")
+		assert.Contains(t, cookies, "b=2")
+	})
+
+	t.Run("param_redirect_scheme_http", func(t *testing.T) {
+		srv := testServerWithStorage(t, func(c *Config) {
+			c.DynamicResp = true
+			c.Auth = true
+			c.Token = testToken
+		})
+		pubKey := testRSAKey(t)
+		_, err := srv.storage.Register(t.Context(), testCorrelationID, pubKey, "secret", nil)
+		require.NoError(t, err)
+
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/?status=302&header=Location:target.com/path", nil)
+		req.Host = testCorrelationID + testNonce + ".test.com"
+		srv.serveDefault(rec, req)
+
+		assert.Equal(t, 302, rec.Code)
+		assert.Equal(t, "http://target.com/path", rec.Header().Get("Location"))
+	})
+
+	t.Run("param_redirect_scheme_https", func(t *testing.T) {
+		srv := testServerWithStorage(t, func(c *Config) {
+			c.DynamicResp = true
+			c.Auth = true
+			c.Token = testToken
+		})
+		pubKey := testRSAKey(t)
+		_, err := srv.storage.Register(t.Context(), testCorrelationID, pubKey, "secret", nil)
+		require.NoError(t, err)
+
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/?status=302&header=Location:target.com", nil)
+		req.Host = testCorrelationID + testNonce + ".test.com"
+		req.TLS = &tls.ConnectionState{}
+		srv.serveDefault(rec, req)
+
+		assert.Equal(t, 302, rec.Code)
+		assert.Equal(t, "https://target.com", rec.Header().Get("Location"))
+	})
+
+	t.Run("param_redirect_explicit_scheme", func(t *testing.T) {
+		srv := testServerWithStorage(t, func(c *Config) {
+			c.DynamicResp = true
+			c.Auth = true
+			c.Token = testToken
+		})
+		pubKey := testRSAKey(t)
+		_, err := srv.storage.Register(t.Context(), testCorrelationID, pubKey, "secret", nil)
+		require.NoError(t, err)
+
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/?status=307&header=Location:https://explicit.com", nil)
+		req.Host = testCorrelationID + testNonce + ".test.com"
+		srv.serveDefault(rec, req)
+
+		assert.Equal(t, 307, rec.Code)
+		assert.Equal(t, "https://explicit.com", rec.Header().Get("Location"))
+	})
+
+	t.Run("param_non_redirect_no_scheme", func(t *testing.T) {
+		srv := testServerWithStorage(t, func(c *Config) {
+			c.DynamicResp = true
+			c.Auth = true
+			c.Token = testToken
+		})
+		pubKey := testRSAKey(t)
+		_, err := srv.storage.Register(t.Context(), testCorrelationID, pubKey, "secret", nil)
+		require.NoError(t, err)
+
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/?status=200&header=Location:target.com&body=ok", nil)
+		req.Host = testCorrelationID + testNonce + ".test.com"
+		srv.serveDefault(rec, req)
+
+		assert.Equal(t, 200, rec.Code)
+		assert.Equal(t, "target.com", rec.Header().Get("Location"))
 	})
 }

@@ -148,7 +148,7 @@ func TestPDIntegration_http_interaction(t *testing.T) {
 	req.Host = payloadHost
 	resp, err := http.DefaultClient.Do(req)
 	require.NoError(t, err)
-	_ = resp.Body.Close()
+	require.NoError(t, resp.Body.Close())
 
 	interactions := collectPDInteractions(t, client, 1, 5*time.Second)
 	require.Len(t, interactions, 1)
@@ -254,7 +254,7 @@ func TestPDIntegration_ftp_interaction(t *testing.T) {
 
 	tp := ftpDial(t, ftpAddr)
 	ftpLogin(t, tp, "alice", "secret")
-	_ = tp.Close()
+	require.NoError(t, tp.Close())
 
 	interactions := collectPDInteractions(t, client, 1, 5*time.Second)
 
@@ -364,7 +364,7 @@ func TestPDIntegration_poll_multi_protocol(t *testing.T) {
 	req.Host = payloadDomain(cid, "http")
 	resp, err := http.DefaultClient.Do(req)
 	require.NoError(t, err)
-	_ = resp.Body.Close()
+	require.NoError(t, resp.Body.Close())
 
 	interactions := collectPDInteractions(t, client, 2, 5*time.Second)
 	require.GreaterOrEqual(t, len(interactions), 2)
@@ -454,7 +454,7 @@ func TestPDIntegration_wildcard_tlddata(t *testing.T) {
 	req.Host = "anything." + testDomain
 	resp, err := http.DefaultClient.Do(req)
 	require.NoError(t, err)
-	_ = resp.Body.Close()
+	require.NoError(t, resp.Body.Close())
 
 	interactions := collectPDInteractions(t, client, 1, 5*time.Second)
 
@@ -659,7 +659,7 @@ func skipIfServerUnreachable(t *testing.T) {
 	if err != nil {
 		t.Skipf("remote server unreachable: %v", err)
 	}
-	_ = resp.Body.Close()
+	require.NoError(t, resp.Body.Close())
 }
 
 // remotePayloadDomain builds {cid}{nonce}.oscar.oastsrv.net.
@@ -912,7 +912,7 @@ func TestPDRemote(t *testing.T) {
 		req.Host = host
 		resp, err := httpClient.Do(req)
 		require.NoError(t, err)
-		_ = resp.Body.Close()
+		require.NoError(t, resp.Body.Close())
 
 		i := rs.waitFor(t, func(i *pdserver.Interaction) bool {
 			return i.FullId == cid+nonce
@@ -941,7 +941,7 @@ func TestPDRemote(t *testing.T) {
 		req.Header.Set("Content-Type", "text/plain")
 		resp, err := httpClient.Do(req)
 		require.NoError(t, err)
-		_ = resp.Body.Close()
+		require.NoError(t, resp.Body.Close())
 
 		i := rs.waitFor(t, func(i *pdserver.Interaction) bool {
 			return i.FullId == cid+nonce
@@ -960,7 +960,7 @@ func TestPDRemote(t *testing.T) {
 		req.Host = host
 		resp, err := httpClient.Do(req)
 		require.NoError(t, err)
-		_ = resp.Body.Close()
+		require.NoError(t, resp.Body.Close())
 
 		i := rs.waitFor(t, func(i *pdserver.Interaction) bool {
 			return i.FullId == cid+nonce
@@ -978,7 +978,7 @@ func TestPDRemote(t *testing.T) {
 		req.Host = host
 		resp, err := httpClient.Do(req)
 		require.NoError(t, err)
-		_ = resp.Body.Close()
+		require.NoError(t, resp.Body.Close())
 
 		i := rs.waitFor(t, func(i *pdserver.Interaction) bool {
 			return i.FullId == cid+nonce
@@ -996,7 +996,7 @@ func TestPDRemote(t *testing.T) {
 		req.Host = host
 		resp, err := httpClient.Do(req)
 		require.NoError(t, err)
-		_ = resp.Body.Close()
+		require.NoError(t, resp.Body.Close())
 
 		i := rs.waitFor(t, func(i *pdserver.Interaction) bool {
 			return i.FullId == cid+nonce
@@ -1014,7 +1014,7 @@ func TestPDRemote(t *testing.T) {
 		req.Host = host
 		resp, err := httpClient.Do(req)
 		require.NoError(t, err)
-		_ = resp.Body.Close()
+		require.NoError(t, resp.Body.Close())
 
 		i := rs.waitFor(t, func(i *pdserver.Interaction) bool {
 			return i.FullId == cid+nonce
@@ -1033,7 +1033,7 @@ func TestPDRemote(t *testing.T) {
 		resp, err := httpClient.Do(req)
 		require.NoError(t, err)
 		body, err := io.ReadAll(resp.Body)
-		_ = resp.Body.Close()
+		require.NoError(t, resp.Body.Close())
 		require.NoError(t, err)
 
 		assert.Contains(t, resp.Header.Get("Content-Type"), "text/plain")
@@ -1055,7 +1055,7 @@ func TestPDRemote(t *testing.T) {
 		resp, err := httpClient.Do(req)
 		require.NoError(t, err)
 		body, err := io.ReadAll(resp.Body)
-		_ = resp.Body.Close()
+		require.NoError(t, resp.Body.Close())
 		require.NoError(t, err)
 
 		assert.Contains(t, resp.Header.Get("Content-Type"), "application/json")
@@ -1077,7 +1077,7 @@ func TestPDRemote(t *testing.T) {
 		resp, err := httpClient.Do(req)
 		require.NoError(t, err)
 		body, err := io.ReadAll(resp.Body)
-		_ = resp.Body.Close()
+		require.NoError(t, resp.Body.Close())
 		require.NoError(t, err)
 
 		assert.Contains(t, resp.Header.Get("Content-Type"), "application/xml")
@@ -1099,7 +1099,7 @@ func TestPDRemote(t *testing.T) {
 		resp, err := httpClient.Do(req)
 		require.NoError(t, err)
 		body, err := io.ReadAll(resp.Body)
-		_ = resp.Body.Close()
+		require.NoError(t, resp.Body.Close())
 		require.NoError(t, err)
 
 		reversed := reverseString(cid + nonce)
@@ -1126,7 +1126,7 @@ func TestPDRemote(t *testing.T) {
 		req.Host = remotePayloadDomain(cid, httpNonce)
 		resp, err := httpClient.Do(req)
 		require.NoError(t, err)
-		_ = resp.Body.Close()
+		require.NoError(t, resp.Body.Close())
 
 		dnsI := rs.waitFor(t, func(i *pdserver.Interaction) bool {
 			return i.FullId == cid+dnsNonce

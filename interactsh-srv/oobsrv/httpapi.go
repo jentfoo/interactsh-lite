@@ -12,6 +12,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/go-appsec/interactsh-lite/oobclient"
 )
 
 const defaultBannerHTML = `<h1>Interactsh-lite Server</h1>
@@ -22,8 +24,13 @@ If you notice interactions with <b>*.%s</b> in your logs, it's possible that som
 
 You should investigate the service that generated these interactions, examine the root cause, and if a vulnerability exists, take the necessary steps to mitigate the issue.`
 
-// maxDynamicDelay caps the ?delay= query parameter to prevent goroutine exhaustion.
-const maxDynamicDelay = 2 * time.Hour
+const (
+	// maxDynamicDelay caps the ?delay= query parameter to prevent goroutine exhaustion.
+	maxDynamicDelay = 2 * time.Hour
+
+	schemeHTTP  = "http://"
+	schemeHTTPS = "https://"
+)
 
 // stripHostPort removes the port from a host:port string.
 func stripHostPort(host string) string {
@@ -96,7 +103,12 @@ func (s *Server) serveDefault(w http.ResponseWriter, r *http.Request) {
 	hostname := strings.ToLower(stripHostPort(r.Host))
 	domain := s.matchDomain(hostname)
 
-	reflection := ReflectURL(hostname, s.cfg.CorrelationIdLength, s.storage.HasCorrelationID)
+	var correlationID, reflection string
+	scanLabels(hostname, s.cfg.CorrelationIdLength, s.storage.HasCorrelationID, func(candidate, label string) bool {
+		correlationID = candidate
+		reflection = reverseString(label)
+		return false
+	})
 
 	// Priority 1: --default-http-response
 	if s.defaultHTTPResponse != nil {
@@ -111,25 +123,25 @@ func (s *Server) serveDefault(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Priority 3: default banner (root path, no reflection)
-	if r.URL.Path == "/" && reflection == "" {
-		s.serveBanner(w, domain)
-		return
-	}
-
-	// Priority 4: content-type routing
+	// Priority 3: content-type routing
 	if s.serveContentTyped(w, r, reflection) {
 		return
 	}
 
-	// Priority 5: dynamic response parameters
-	if s.cfg.DynamicResp && s.serveDynamic(w, r) {
+	// Priority 4: stored or param-based response (requires correlation match)
+	if reflection != "" {
+		if s.serveResponse(w, r, correlationID, reflection) {
+			return
+		}
+
+		// Priority 5: HTML CID reflection default
+		w.Header().Set("Content-Type", "text/html")
+		_, _ = fmt.Fprintf(w, "<html><head></head><body>%s</body></html>", reflection)
 		return
 	}
 
-	// Priority 6: default HTML fallback
-	w.Header().Set("Content-Type", "text/html")
-	_, _ = fmt.Fprintf(w, "<html><head></head><body>%s</body></html>", reflection)
+	// Priority 6: default banner
+	s.serveBanner(w, domain)
 }
 
 // serveBanner writes the custom index page or the built-in banner.
@@ -201,7 +213,21 @@ func (s *Server) serveStaticFile(w http.ResponseWriter, r *http.Request) {
 	http.ServeContent(w, r, stat.Name(), stat.ModTime(), f)
 }
 
+// redirectLocationScheme prepends the inbound request's scheme to a schemeless
+// Location value on 302/307 redirects.
+func redirectLocationScheme(value string, r *http.Request) string {
+	if strings.HasPrefix(value, schemeHTTP) || strings.HasPrefix(value, schemeHTTPS) {
+		return value
+	}
+	scheme := schemeHTTP
+	if r.TLS != nil {
+		scheme = schemeHTTPS
+	}
+	return scheme + value
+}
+
 // applyDynamicParams applies delay, header, and status query parameters.
+// For 302/307 redirects, schemeless Location values get the request's scheme prepended.
 func applyDynamicParams(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 
@@ -217,16 +243,29 @@ func applyDynamicParams(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	for _, h := range q["header"] {
-		if name, value, ok := strings.Cut(h, ":"); ok {
-			w.Header().Set(strings.TrimSpace(name), strings.TrimSpace(value))
+	var statusCode int
+	if st := q.Get("status"); st != "" {
+		if code, err := strconv.Atoi(st); err == nil && code > 0 {
+			statusCode = code
 		}
 	}
 
-	if st := q.Get("status"); st != "" {
-		if code, err := strconv.Atoi(st); err == nil && code > 0 {
-			w.WriteHeader(code)
+	isRedirect := statusCode == 302 || statusCode == 307
+	for _, h := range q["header"] {
+		name, value, ok := strings.Cut(h, ":")
+		if !ok {
+			continue
 		}
+		name = strings.TrimSpace(name)
+		value = strings.TrimSpace(value)
+		if isRedirect && strings.EqualFold(name, "location") {
+			value = redirectLocationScheme(value, r)
+		}
+		w.Header().Add(name, value)
+	}
+
+	if statusCode > 0 {
+		w.WriteHeader(statusCode)
 	}
 }
 
@@ -251,8 +290,28 @@ func (s *Server) serveContentTyped(w http.ResponseWriter, r *http.Request, refle
 	return false
 }
 
-// serveDynamic handles dynamic response parameters. Returns true if triggered.
-func (s *Server) serveDynamic(w http.ResponseWriter, r *http.Request) bool {
+// serveResponse serves a configured response from encoded query params or
+// the session-stored config. Returns true if a response was served.
+func (s *Server) serveResponse(w http.ResponseWriter, r *http.Request, correlationID, reflection string) bool {
+	// Sub-path 1: param-based encoded response (requires --dynamic-resp)
+	if s.cfg.DynamicResp && s.serveDynamicResponse(w, r, reflection) {
+		return true
+	}
+
+	// Sub-path 2: session-stored response
+	if correlationID != "" {
+		if cfg := s.storage.GetResponse(correlationID); cfg != nil {
+			writeResponseConfig(w, r, cfg, reflection)
+			return true
+		}
+	}
+
+	return false
+}
+
+// serveDynamicResponse handles dynamic response parameters. Returns true if triggered.
+// On unauthenticated servers, only redirect responses are allowed.
+func (s *Server) serveDynamicResponse(w http.ResponseWriter, r *http.Request, reflection string) bool {
 	q := r.URL.Query()
 
 	// Check for /b64_body: path form
@@ -270,12 +329,32 @@ func (s *Server) serveDynamic(w http.ResponseWriter, r *http.Request) bool {
 	hasB64Body := q.Has("b64_body")
 
 	if !hasPathBody && !hasBody && !hasB64Body && !q.Has("header") && !q.Has("status") && !q.Has("delay") {
-		return false // No dynamic params triggered
+		return false // no dynamic params triggered
+	}
+
+	// Unauth validation: non-delay params must form a valid redirect.
+	// Delay-only requests skip validation (gated by --dynamic-resp).
+	hasNonDelayParams := hasPathBody || hasBody || hasB64Body || q.Has("header") || q.Has("status")
+
+	if !s.cfg.Auth && hasNonDelayParams {
+		cfg := &oobclient.ResponseConfig{}
+		if st := q.Get("status"); st != "" {
+			if code, err := strconv.Atoi(st); err == nil && code > 0 {
+				cfg.StatusCode = code
+			}
+		}
+		cfg.Headers = append(cfg.Headers, q["header"]...)
+		if hasPathBody || hasBody || hasB64Body {
+			cfg.Body = "-"
+		}
+		if !cfg.IsAllowedUnauthenticated() {
+			return false
+		}
 	}
 
 	applyDynamicParams(w, r)
 
-	// Body (path form takes priority, then b64_body, then body)
+	// Body (path form takes priority, then b64_body, then body, then reflection)
 	switch {
 	case hasPathBody:
 		_, _ = w.Write(pathBody)
@@ -285,7 +364,42 @@ func (s *Server) serveDynamic(w http.ResponseWriter, r *http.Request) bool {
 		}
 	case hasBody:
 		_, _ = io.WriteString(w, q.Get("body"))
+	default:
+		_, _ = io.WriteString(w, reflection)
 	}
 
 	return true
+}
+
+// writeResponseConfig writes an oobclient.ResponseConfig to w.
+// For 302/307 responses, Location headers without a scheme get the inbound
+// request's scheme prepended (https when r.TLS != nil, http otherwise).
+func writeResponseConfig(w http.ResponseWriter, r *http.Request, cfg *oobclient.ResponseConfig, reflection string) {
+	isRedirect := cfg.StatusCode == 302 || cfg.StatusCode == 307
+	for _, h := range cfg.Headers {
+		name, value, ok := strings.Cut(h, ":")
+		if !ok {
+			continue
+		}
+		name = strings.TrimSpace(name)
+		value = strings.TrimSpace(value)
+
+		if isRedirect && strings.EqualFold(name, "location") {
+			value = redirectLocationScheme(value, r)
+		}
+		w.Header().Add(name, value)
+	}
+
+	statusCode := cfg.StatusCode
+	if statusCode == 0 {
+		statusCode = http.StatusOK
+	}
+	w.WriteHeader(statusCode)
+
+	switch {
+	case cfg.Body != "":
+		_, _ = io.WriteString(w, cfg.Body)
+	default:
+		_, _ = io.WriteString(w, reflection)
+	}
 }

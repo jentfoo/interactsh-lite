@@ -214,11 +214,12 @@ func TestHandleRegister(t *testing.T) {
 	t.Run("invalid_public_key", func(t *testing.T) {
 		srv := testServerWithStorage(t)
 
-		body, _ := json.Marshal(registerRequest{
+		body, err := json.Marshal(registerRequest{
 			PublicKey:     "bm90LWEta2V5",
 			SecretKey:     "secret",
 			CorrelationID: testCorrelationID,
 		})
+		require.NoError(t, err)
 		rec := httptest.NewRecorder()
 		req := httptest.NewRequest(http.MethodPost, "/register", bytes.NewReader(body))
 		srv.Handler().ServeHTTP(rec, req)
@@ -270,6 +271,114 @@ func TestHandleRegister(t *testing.T) {
 
 		assert.Equal(t, uint64(20), srv.storage.SessionCount())
 	})
+
+	t.Run("response_auth_server", func(t *testing.T) {
+		srv := testServerWithStorage(t, func(c *Config) {
+			c.Auth = true
+			c.Token = testToken
+			c.DynamicResp = true
+		})
+		key := testRSAKeyPair(t)
+
+		b64Key := encodeTestPublicKey(t, &key.PublicKey)
+		body, err := json.Marshal(map[string]any{
+			"public-key":     b64Key,
+			"secret-key":     "secret",
+			"correlation-id": testCorrelationID,
+			"response": map[string]any{
+				"status-code": 200,
+				"headers":     []string{"Content-Type: text/plain"},
+				"body":        "custom",
+			},
+		})
+		require.NoError(t, err)
+
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/register", bytes.NewReader(body))
+		req.Header.Set("Authorization", testToken)
+		srv.Handler().ServeHTTP(rec, req)
+
+		assert.Equal(t, http.StatusOK, rec.Code)
+	})
+
+	t.Run("response_unauth_redirect_allowed", func(t *testing.T) {
+		srv := testServerWithStorage(t, func(c *Config) {
+			c.DynamicResp = true
+		})
+		key := testRSAKeyPair(t)
+
+		b64Key := encodeTestPublicKey(t, &key.PublicKey)
+		body, err := json.Marshal(map[string]any{
+			"public-key":     b64Key,
+			"secret-key":     "secret",
+			"correlation-id": testCorrelationID,
+			"response": map[string]any{
+				"status-code": 302,
+				"headers":     []string{"Location: https://example.com"},
+			},
+		})
+		require.NoError(t, err)
+
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/register", bytes.NewReader(body))
+		srv.Handler().ServeHTTP(rec, req)
+
+		assert.Equal(t, http.StatusOK, rec.Code)
+	})
+
+	t.Run("response_unauth_non_redirect_rejected", func(t *testing.T) {
+		srv := testServerWithStorage(t, func(c *Config) {
+			c.DynamicResp = true
+		})
+		key := testRSAKeyPair(t)
+
+		b64Key := encodeTestPublicKey(t, &key.PublicKey)
+		body, err := json.Marshal(map[string]any{
+			"public-key":     b64Key,
+			"secret-key":     "secret",
+			"correlation-id": testCorrelationID,
+			"response": map[string]any{
+				"status-code": 200,
+				"body":        "not allowed",
+			},
+		})
+		require.NoError(t, err)
+
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/register", bytes.NewReader(body))
+		srv.Handler().ServeHTTP(rec, req)
+
+		assert.Equal(t, http.StatusBadRequest, rec.Code)
+		var resp map[string]string
+		require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
+		assert.Contains(t, resp["error"], "unauthenticated")
+	})
+
+	t.Run("response_dynamic_resp_disabled", func(t *testing.T) {
+		srv := testServerWithStorage(t) // DynamicResp false by default
+		key := testRSAKeyPair(t)
+
+		b64Key := encodeTestPublicKey(t, &key.PublicKey)
+		body, err := json.Marshal(map[string]any{
+			"public-key":     b64Key,
+			"secret-key":     "secret",
+			"correlation-id": testCorrelationID,
+			"response": map[string]any{
+				"status-code": 302,
+				"headers":     []string{"Location: https://example.com"},
+			},
+		})
+		require.NoError(t, err)
+
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/register", bytes.NewReader(body))
+		srv.Handler().ServeHTTP(rec, req)
+
+		assert.Equal(t, http.StatusBadRequest, rec.Code)
+		var resp map[string]string
+		require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
+		assert.Contains(t, resp["error"], "dynamic-resp")
+	})
 }
 
 func TestHandlePoll(t *testing.T) {
@@ -279,7 +388,7 @@ func TestHandlePoll(t *testing.T) {
 		srv := testServerWithStorage(t)
 		key := testRSAKeyPair(t)
 
-		aesKey, err := srv.storage.Register(t.Context(), testCorrelationID, &key.PublicKey, "secret")
+		aesKey, err := srv.storage.Register(t.Context(), testCorrelationID, &key.PublicKey, "secret", nil)
 		require.NoError(t, err)
 
 		interaction := oobclient.Interaction{
@@ -318,7 +427,7 @@ func TestHandlePoll(t *testing.T) {
 		srv := testServerWithStorage(t)
 		key := testRSAKeyPair(t)
 
-		_, err := srv.storage.Register(t.Context(), testCorrelationID, &key.PublicKey, "secret")
+		_, err := srv.storage.Register(t.Context(), testCorrelationID, &key.PublicKey, "secret", nil)
 		require.NoError(t, err)
 
 		rec := httptest.NewRecorder()
@@ -338,7 +447,7 @@ func TestHandlePoll(t *testing.T) {
 		srv := testServerWithStorage(t)
 		key := testRSAKeyPair(t)
 
-		_, err := srv.storage.Register(t.Context(), testCorrelationID, &key.PublicKey, "secret")
+		_, err := srv.storage.Register(t.Context(), testCorrelationID, &key.PublicKey, "secret", nil)
 		require.NoError(t, err)
 		require.NoError(t, srv.storage.AppendInteraction(testCorrelationID, []byte(`{"protocol":"dns"}`)))
 
@@ -363,11 +472,12 @@ func TestHandlePoll(t *testing.T) {
 		srv := testServerWithStorage(t)
 		key := testRSAKeyPair(t)
 
-		aesKey, err := srv.storage.Register(t.Context(), testCorrelationID, &key.PublicKey, "secret")
+		aesKey, err := srv.storage.Register(t.Context(), testCorrelationID, &key.PublicKey, "secret", nil)
 		require.NoError(t, err)
 
 		for _, proto := range []string{"dns", "http", "smtp"} {
-			data, _ := json.Marshal(oobclient.Interaction{Protocol: proto, UniqueID: testCorrelationID, RemoteAddress: "1.2.3.4", Timestamp: time.Now()})
+			data, err := json.Marshal(oobclient.Interaction{Protocol: proto, UniqueID: testCorrelationID, RemoteAddress: "1.2.3.4", Timestamp: time.Now()})
+			require.NoError(t, err)
 			require.NoError(t, srv.storage.AppendInteraction(testCorrelationID, data))
 		}
 
@@ -404,7 +514,7 @@ func TestHandlePoll(t *testing.T) {
 		srv := testServerWithStorage(t)
 		key := testRSAKeyPair(t)
 
-		_, err := srv.storage.Register(t.Context(), testCorrelationID, &key.PublicKey, "correct")
+		_, err := srv.storage.Register(t.Context(), testCorrelationID, &key.PublicKey, "correct", nil)
 		require.NoError(t, err)
 
 		rec := httptest.NewRecorder()
@@ -421,7 +531,7 @@ func TestHandlePoll(t *testing.T) {
 		srv := testServerWithStorage(t)
 		key := testRSAKeyPair(t)
 
-		_, err := srv.storage.Register(t.Context(), testCorrelationID, &key.PublicKey, "secret")
+		_, err := srv.storage.Register(t.Context(), testCorrelationID, &key.PublicKey, "secret", nil)
 		require.NoError(t, err)
 
 		rec := httptest.NewRecorder()
@@ -435,7 +545,7 @@ func TestHandlePoll(t *testing.T) {
 		srv := testServerWithStorage(t)
 		key := testRSAKeyPair(t)
 
-		_, err := srv.storage.Register(t.Context(), testCorrelationID, &key.PublicKey, "secret")
+		_, err := srv.storage.Register(t.Context(), testCorrelationID, &key.PublicKey, "secret", nil)
 		require.NoError(t, err)
 
 		rec := httptest.NewRecorder()
@@ -461,7 +571,7 @@ func TestHandlePoll(t *testing.T) {
 		})
 		key := testRSAKeyPair(t)
 
-		_, err := srv.storage.Register(t.Context(), testCorrelationID, &key.PublicKey, "secret")
+		_, err := srv.storage.Register(t.Context(), testCorrelationID, &key.PublicKey, "secret", nil)
 		require.NoError(t, err)
 
 		// Populate all three buckets
@@ -492,7 +602,7 @@ func TestHandlePoll(t *testing.T) {
 		})
 		key := testRSAKeyPair(t)
 
-		_, err := srv.storage.Register(t.Context(), testCorrelationID, &key.PublicKey, "secret")
+		_, err := srv.storage.Register(t.Context(), testCorrelationID, &key.PublicKey, "secret", nil)
 		require.NoError(t, err)
 
 		srv.tldBuckets["a.com"].Append([]byte(`{"domain":"a.com"}`))
@@ -523,9 +633,9 @@ func TestHandlePoll(t *testing.T) {
 		const id1 = "aaaaaaaaaaaaaaaaaaaa"
 		const id2 = "bbbbbbbbbbbbbbbbbbbb"
 
-		_, err := srv.storage.Register(t.Context(), id1, &key1.PublicKey, "s1")
+		_, err := srv.storage.Register(t.Context(), id1, &key1.PublicKey, "s1", nil)
 		require.NoError(t, err)
-		_, err = srv.storage.Register(t.Context(), id2, &key2.PublicKey, "s2")
+		_, err = srv.storage.Register(t.Context(), id2, &key2.PublicKey, "s2", nil)
 		require.NoError(t, err)
 
 		srv.tldBuckets["test.com"].Append([]byte(`{"protocol":"http","unique-id":"shared1"}`))
@@ -639,7 +749,7 @@ func TestHandleDeregister(t *testing.T) {
 		srv := testServerWithStorage(t)
 		key := testRSAKeyPair(t)
 
-		_, err := srv.storage.Register(t.Context(), testCorrelationID, &key.PublicKey, "secret")
+		_, err := srv.storage.Register(t.Context(), testCorrelationID, &key.PublicKey, "secret", nil)
 		require.NoError(t, err)
 
 		body := deregisterJSON(testCorrelationID, "secret")
@@ -672,7 +782,7 @@ func TestHandleDeregister(t *testing.T) {
 		srv := testServerWithStorage(t)
 		key := testRSAKeyPair(t)
 
-		_, err := srv.storage.Register(t.Context(), testCorrelationID, &key.PublicKey, "correct")
+		_, err := srv.storage.Register(t.Context(), testCorrelationID, &key.PublicKey, "correct", nil)
 		require.NoError(t, err)
 
 		body := deregisterJSON(testCorrelationID, "wrong")
@@ -690,7 +800,7 @@ func TestHandleDeregister(t *testing.T) {
 		srv := testServerWithStorage(t)
 		key := testRSAKeyPair(t)
 
-		_, err := srv.storage.Register(t.Context(), testCorrelationID, &key.PublicKey, "secret")
+		_, err := srv.storage.Register(t.Context(), testCorrelationID, &key.PublicKey, "secret", nil)
 		require.NoError(t, err)
 		assert.Equal(t, uint64(1), srv.storage.SessionCount())
 
@@ -708,7 +818,7 @@ func TestHandleDeregister(t *testing.T) {
 		srv := testServerWithStorage(t)
 		key := testRSAKeyPair(t)
 
-		_, err := srv.storage.Register(t.Context(), testCorrelationID, &key.PublicKey, "secret")
+		_, err := srv.storage.Register(t.Context(), testCorrelationID, &key.PublicKey, "secret", nil)
 		require.NoError(t, err)
 
 		body := deregisterJSON(testCorrelationID+"extrachars", "secret")

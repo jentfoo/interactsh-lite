@@ -701,7 +701,7 @@ func TestDNSACMEChallenge(t *testing.T) {
 		srv.acmeStore.Set("_acme-challenge.test.com", "token")
 
 		// Register a session to check interaction storage
-		_, err := srv.storage.Register(t.Context(), testCorrelationID, &testRSAKeyPair(t).PublicKey, "secret")
+		_, err := srv.storage.Register(t.Context(), testCorrelationID, &testRSAKeyPair(t).PublicKey, "secret", nil)
 		require.NoError(t, err)
 
 		queryDNS(t, addr, "_acme-challenge.test.com", dns.TypeTXT)
@@ -823,7 +823,7 @@ func TestDNSMultiDomain(t *testing.T) {
 		})
 
 		key := testRSAKeyPair(t)
-		aesKey, err := srv.storage.Register(t.Context(), testCorrelationID, &key.PublicKey, "secret")
+		aesKey, err := srv.storage.Register(t.Context(), testCorrelationID, &key.PublicKey, "secret", nil)
 		require.NoError(t, err)
 
 		// Query under sub.example.com - full-id should strip sub.example.com
@@ -864,7 +864,7 @@ func TestDNSInteractionCapture(t *testing.T) {
 	t.Run("correlation_id_extracted", func(t *testing.T) {
 		srv, addr := testDNSServer(t)
 		key := testRSAKeyPair(t)
-		_, err := srv.storage.Register(t.Context(), testCorrelationID, &key.PublicKey, "secret")
+		_, err := srv.storage.Register(t.Context(), testCorrelationID, &key.PublicKey, "secret", nil)
 		require.NoError(t, err)
 
 		// Query with correlation ID as subdomain prefix + nonce
@@ -878,7 +878,7 @@ func TestDNSInteractionCapture(t *testing.T) {
 	t.Run("correct_interaction_fields", func(t *testing.T) {
 		srv, addr := testDNSServer(t)
 		key := testRSAKeyPair(t)
-		aesKey, err := srv.storage.Register(t.Context(), testCorrelationID, &key.PublicKey, "secret")
+		aesKey, err := srv.storage.Register(t.Context(), testCorrelationID, &key.PublicKey, "secret", nil)
 		require.NoError(t, err)
 
 		queryDNS(t, addr, testCorrelationID+"abc.test.com", dns.TypeA)
@@ -903,7 +903,7 @@ func TestDNSInteractionCapture(t *testing.T) {
 	t.Run("no_capture_non_configured", func(t *testing.T) {
 		srv, addr := testDNSServer(t)
 		key := testRSAKeyPair(t)
-		_, err := srv.storage.Register(t.Context(), testCorrelationID, &key.PublicKey, "secret")
+		_, err := srv.storage.Register(t.Context(), testCorrelationID, &key.PublicKey, "secret", nil)
 		require.NoError(t, err)
 
 		queryDNS(t, addr, testCorrelationID+"abc.other.org", dns.TypeA)
@@ -916,7 +916,7 @@ func TestDNSInteractionCapture(t *testing.T) {
 	t.Run("remote_addr_without_port", func(t *testing.T) {
 		srv, _ := testDNSServer(t)
 		key := testRSAKeyPair(t)
-		aesKey, err := srv.storage.Register(t.Context(), testCorrelationID, &key.PublicKey, "secret")
+		aesKey, err := srv.storage.Register(t.Context(), testCorrelationID, &key.PublicKey, "secret", nil)
 		require.NoError(t, err)
 
 		// Build a DNS request message
@@ -944,7 +944,7 @@ func TestDNSInteractionCapture(t *testing.T) {
 			}
 		})
 		key := testRSAKeyPair(t)
-		_, err := srv.storage.Register(t.Context(), testCorrelationID, &key.PublicKey, "secret")
+		_, err := srv.storage.Register(t.Context(), testCorrelationID, &key.PublicKey, "secret", nil)
 		require.NoError(t, err)
 
 		queryDNS(t, addr, testCorrelationID+"abc.test.com", dns.TypeA)
@@ -971,7 +971,7 @@ func TestDNSScanEverywhere(t *testing.T) {
 		s.cfg.ScanEverywhere = true
 	})
 	key := testRSAKeyPair(t)
-	_, err := srv.storage.Register(t.Context(), testCorrelationID, &key.PublicKey, "secret")
+	_, err := srv.storage.Register(t.Context(), testCorrelationID, &key.PublicKey, "secret", nil)
 	require.NoError(t, err)
 
 	// Embed correlation ID in a subdomain that wouldn't match standard extraction
@@ -1012,8 +1012,10 @@ func TestStartDNS(t *testing.T) {
 		tcpLn, err := net.Listen("tcp", "127.0.0.1:0")
 		require.NoError(t, err)
 		t.Cleanup(func() { _ = tcpLn.Close() })
-		_, portStr, _ := net.SplitHostPort(tcpLn.Addr().String())
-		port, _ := strconv.Atoi(portStr)
+		_, portStr, err := net.SplitHostPort(tcpLn.Addr().String())
+		require.NoError(t, err)
+		port, err := strconv.Atoi(portStr)
+		require.NoError(t, err)
 
 		cfg := validTestConfig()
 		cfg.ListenIP = "127.0.0.1"

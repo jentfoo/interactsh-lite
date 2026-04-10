@@ -12,6 +12,7 @@ A lightweight, dependency-minimal Go project for [Interactsh](https://github.com
 - Thread-safe client with clear state machine
 - Session persistence for long-running tests
 - Cross-compatible: the go-appsec/interactsh-lite client works with ProjectDiscovery's public servers and the go-appsec/interactsh-lite server; the go-appsec/interactsh-lite server works with both this project's client and ProjectDiscovery's official `interactsh-client`
+- Redirect testing with session-stored or query parameter encoded redirect responses on hosted `*.oastsrv.net` servers
 - Standalone CLI client (installed as `interactsh-lite`) and server (installed as `interactsh-srv`)
 
 ## Supported Protocols
@@ -20,7 +21,7 @@ A lightweight, dependency-minimal Go project for [Interactsh](https://github.com
 |----------|-------------|
 | DNS | A, AAAA, CNAME, MX, TXT, NS, SOA queries |
 | HTTP/HTTPS | Full request and response capture |
-| SMTP/SMTPS | Email interactions with MAIL FROM capture |
+| SMTP/SMTPS | Email interactions with MAIL FROM and RCPT TO capture |
 | FTP/FTPS | FTP file and directory operation capture |
 | LDAP | LDAP search query interactions |
 
@@ -223,8 +224,8 @@ if errors.Is(err, oobclient.ErrClientClosed) {
 // specific test cases with their interactions.
 url1 := client.Domain()
 url2 := client.Domain()
-// Example: "cn4h7pjqdka31f8e5g6bry8djt4un3h1x.alpha.oastsrv.net" (20-char correlation ID + 13-char nonce)
-// Example: "cn4h7pjqdka31f8e5g6bkne9wfg4a3mt1.alpha.oastsrv.net"
+// Example: "cn4h7pjqdka31f8e5g6b.alpha.oastsrv.net" (16-char correlation ID + 4-char nonce)
+// Example: "cn4h7pjqdka31f8ekne9.alpha.oastsrv.net"
 // Both share the same correlation ID prefix but have unique nonces.
 ```
 
@@ -278,7 +279,7 @@ Key differences:
  })
 ```
 
-The `Interaction` struct fields are identical.
+The `Interaction` struct is compatible - all original fields are preserved, with an added `SMTPTo` field when supported by the server.
 
 #### Closing the Client
 
@@ -304,6 +305,27 @@ The `Interaction` struct fields are identical.
  }
 ```
 
+#### Redirect Testing
+
+Unauthenticated servers (including the hosted `*.oastsrv.net` servers) allow 302/307 redirects with a `Location` header.
+
+Session-stored response - set at registration time, applies to all HTTP interactions on the session:
+
+```go
+client, err := oobclient.New(ctx, oobclient.Options{
+    Response: &oobclient.ResponseConfig{
+        StatusCode: 302,
+        Headers:    []string{"Location: https://example.com/callback"},
+    },
+})
+```
+
+Per-URL dynamic response - encode response parameters directly in the URL. `client.EncodedResponse()` produces the same format from Go:
+
+```
+https://<correlation-id>.oastsrv.net/?status=307&header=Location:+https://target.com
+```
+
 ### API Reference
 
 #### Types
@@ -314,6 +336,7 @@ The `Interaction` struct fields are identical.
 | `Options` | Configuration options for client creation |
 | `Interaction` | Captured OOB interaction data |
 | `InteractionCallback` | Callback function type for polling |
+| `ResponseConfig` | Session-stored HTTP response configured on a session |
 
 #### Sentinel Errors
 
@@ -323,7 +346,6 @@ The `Interaction` struct fields are identical.
 | `ErrUnauthorized` | Invalid or missing authentication token |
 | `ErrClientClosed` | Operation attempted on a closed client |
 | `ErrAlreadyPolling` | StartPolling called while already polling |
-| `ErrNotPolling` | StopPolling called while not polling |
 
 ## Server
 
@@ -399,7 +421,7 @@ INPUT:
       --cert string                    Custom TLS certificate file path
       --privkey string                 Custom TLS private key file path
       --origin-ip-header, --oih string HTTP header for real client IP (behind reverse proxy)
-      --max-request-size, --mrs int    Max HTTP request body in MB, 0=unlimited (default 0)
+      --max-request-size, --mrs int    Max HTTP request body in MB, 0=unlimited (default 100)
 
 CONFIG:
       --config string                  Config file path (default "~/.config/interactsh-server/config.yaml")
@@ -460,7 +482,7 @@ correlation-id-length: 20
 cert: ""
 privkey: ""
 origin-ip-header: ""
-max-request-size: 0
+max-request-size: 100
 
 # Config
 resolvers: []
@@ -525,6 +547,12 @@ interactsh-srv --domain oast.example.com --origin-ip-header X-Forwarded-For --sk
 # Run health check diagnostics
 interactsh-srv --health-check
 ```
+
+### Dynamic Responses and Redirect Testing
+
+With `--dynamic-resp` enabled, the server supports controlled HTTP responses via query parameters and session-stored response configurations. On authenticated servers, any response content is allowed. On unauthenticated servers, only 302/307 redirects with a `Location` header are permitted - this enables redirect testing without exposing the server to arbitrary content injection.
+
+The go-appsec hosted OAST servers (`*.oastsrv.net`) run with `--dynamic-resp` enabled, allowing unauthenticated redirect testing out of the box. See [Redirect Testing](#redirect-testing) for client usage examples.
 
 ### Migrating from ProjectDiscovery/interactsh Server
 

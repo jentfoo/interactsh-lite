@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/go-appsec/interactsh-lite/oobclient"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	leveldberrors "github.com/syndtr/goleveldb/leveldb/errors"
@@ -109,7 +110,7 @@ var registerTests = []storageTest{
 		name: "register/new_registration",
 		action: func(t *testing.T, s Storage) {
 			t.Helper()
-			aesKey, err := s.Register(t.Context(), "testcorrelationid001", testRSAKey(t), "secret1")
+			aesKey, err := s.Register(t.Context(), "testcorrelationid001", testRSAKey(t), "secret1", nil)
 			require.NoError(t, err)
 			assert.Len(t, aesKey, 32)
 		},
@@ -133,10 +134,10 @@ var registerTests = []storageTest{
 		action: func(t *testing.T, s Storage) {
 			t.Helper()
 			pubKey := testRSAKey(t)
-			aesKey1, err := s.Register(t.Context(), "testcorrelationid001", pubKey, "secret1")
+			aesKey1, err := s.Register(t.Context(), "testcorrelationid001", pubKey, "secret1", nil)
 			require.NoError(t, err)
 
-			aesKey2, err := s.Register(t.Context(), "testcorrelationid001", pubKey, "secret1")
+			aesKey2, err := s.Register(t.Context(), "testcorrelationid001", pubKey, "secret1", nil)
 			require.NoError(t, err)
 			assert.Equal(t, aesKey1, aesKey2)
 		},
@@ -160,10 +161,10 @@ var registerTests = []storageTest{
 		action: func(t *testing.T, s Storage) {
 			t.Helper()
 			pubKey := testRSAKey(t)
-			_, err := s.Register(t.Context(), "testcorrelationid001", pubKey, "secret1")
+			_, err := s.Register(t.Context(), "testcorrelationid001", pubKey, "secret1", nil)
 			require.NoError(t, err)
 
-			_, err = s.Register(t.Context(), "testcorrelationid001", pubKey, "wrong-secret")
+			_, err = s.Register(t.Context(), "testcorrelationid001", pubKey, "wrong-secret", nil)
 			require.Error(t, err)
 			assert.Contains(t, err.Error(), "correlation-id provided already exists")
 		},
@@ -183,7 +184,7 @@ var registerTests = []storageTest{
 				id := fmt.Sprintf("testcorrelationid%02d", i)
 				go func() {
 					defer wg.Done()
-					_, _ = s.Register(t.Context(), id, pubKey, "secret")
+					_, _ = s.Register(t.Context(), id, pubKey, "secret", nil)
 				}()
 			}
 			wg.Wait()
@@ -209,11 +210,11 @@ var registerTests = []storageTest{
 			pubKey1 := testRSAKey(t)
 			pubKey2 := testRSAKey(t)
 
-			_, err := s.Register(t.Context(), testCorrelationID, pubKey1, "secret")
+			_, err := s.Register(t.Context(), testCorrelationID, pubKey1, "secret", nil)
 			require.NoError(t, err)
 
 			// Keep-alive with different pubkey but same secret
-			_, err = s.Register(t.Context(), testCorrelationID, pubKey2, "secret")
+			_, err = s.Register(t.Context(), testCorrelationID, pubKey2, "secret", nil)
 			require.NoError(t, err)
 
 			handle, err := s.GetSession(testCorrelationID, "secret")
@@ -244,14 +245,14 @@ var registerTests = []storageTest{
 			baseTime := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
 			ms.clock = func() time.Time { return baseTime }
 
-			aesKey1, err := built.Register(t.Context(), "testcorrelationid001", pubKey, "secret1")
+			aesKey1, err := built.Register(t.Context(), "testcorrelationid001", pubKey, "secret1", nil)
 			require.NoError(t, err)
 
 			// Advance past TTL
 			ms.clock = func() time.Time { return baseTime.Add(48 * time.Hour) }
 
 			// Re-register with different secret - expired session evicted
-			aesKey2, err := built.Register(t.Context(), "testcorrelationid001", pubKey, "secret2")
+			aesKey2, err := built.Register(t.Context(), "testcorrelationid001", pubKey, "secret2", nil)
 			require.NoError(t, err)
 			assert.NotEqual(t, aesKey1, aesKey2)
 			assert.Equal(t, uint64(1), built.SessionCount())
@@ -281,14 +282,14 @@ var registerTests = []storageTest{
 			baseTime := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
 			ms.clock = func() time.Time { return baseTime }
 
-			aesKey1, err := built.Register(t.Context(), "testcorrelationid001", pubKey, "secret1")
+			aesKey1, err := built.Register(t.Context(), "testcorrelationid001", pubKey, "secret1", nil)
 			require.NoError(t, err)
 
 			// Advance past TTL
 			ms.clock = func() time.Time { return baseTime.Add(48 * time.Hour) }
 
 			// Re-register with same secret - expired session evicted, fresh registration
-			aesKey2, err := built.Register(t.Context(), "testcorrelationid001", pubKey, "secret1")
+			aesKey2, err := built.Register(t.Context(), "testcorrelationid001", pubKey, "secret1", nil)
 			require.NoError(t, err)
 			assert.NotEqual(t, aesKey1, aesKey2)
 			assert.Equal(t, uint64(1), built.SessionCount())
@@ -304,11 +305,11 @@ var registerTests = []storageTest{
 			t.Helper()
 			const cid = "testcorrelationid001"
 			pubKey := testRSAKey(t)
-			_, err := s.Register(t.Context(), cid, pubKey, "secret1")
+			_, err := s.Register(t.Context(), cid, pubKey, "secret1", nil)
 			require.NoError(t, err)
 			require.NoError(t, s.AppendInteraction(cid, []byte(`{"protocol":"http"}`)))
 			require.NoError(t, s.Delete(cid, "secret1"))
-			_, err = s.Register(t.Context(), cid, pubKey, "secret2")
+			_, err = s.Register(t.Context(), cid, pubKey, "secret2", nil)
 			require.NoError(t, err)
 		},
 		assert: func(t *testing.T, s Storage) {
@@ -325,13 +326,75 @@ var registerTests = []storageTest{
 	},
 }
 
+var getResponseTests = []storageTest{
+	{
+		name: "get_response/with_config",
+		action: func(t *testing.T, s Storage) {
+			t.Helper()
+			cfg := &oobclient.ResponseConfig{
+				StatusCode: 302,
+				Headers:    []string{"Location: https://example.com"},
+			}
+			_, err := s.Register(t.Context(), "testcorrelationid001", testRSAKey(t), "secret1", cfg)
+			require.NoError(t, err)
+		},
+		assert: func(t *testing.T, s Storage) {
+			t.Helper()
+			resp := s.GetResponse("testcorrelationid001")
+			require.NotNil(t, resp)
+			assert.Equal(t, 302, resp.StatusCode)
+			assert.Equal(t, []string{"Location: https://example.com"}, resp.Headers)
+		},
+	},
+	{
+		name: "get_response/nil_config",
+		action: func(t *testing.T, s Storage) {
+			t.Helper()
+			_, err := s.Register(t.Context(), "testcorrelationid001", testRSAKey(t), "secret1", nil)
+			require.NoError(t, err)
+		},
+		assert: func(t *testing.T, s Storage) {
+			t.Helper()
+			assert.Nil(t, s.GetResponse("testcorrelationid001"))
+		},
+	},
+	{
+		name: "get_response/nonexistent_session",
+		assert: func(t *testing.T, s Storage) {
+			t.Helper()
+			assert.Nil(t, s.GetResponse("nonexistent00000000"))
+		},
+	},
+	{
+		name: "get_response/keep_alive_immutable",
+		action: func(t *testing.T, s Storage) {
+			t.Helper()
+			pubKey := testRSAKey(t)
+			cfg1 := &oobclient.ResponseConfig{StatusCode: 302, Headers: []string{"Location: https://first.com"}}
+			_, err := s.Register(t.Context(), "testcorrelationid001", pubKey, "secret1", cfg1)
+			require.NoError(t, err)
+
+			cfg2 := &oobclient.ResponseConfig{StatusCode: 307, Headers: []string{"Location: https://second.com"}}
+			_, err = s.Register(t.Context(), "testcorrelationid001", pubKey, "secret1", cfg2)
+			require.NoError(t, err)
+		},
+		assert: func(t *testing.T, s Storage) {
+			t.Helper()
+			resp := s.GetResponse("testcorrelationid001")
+			require.NotNil(t, resp)
+			assert.Equal(t, 302, resp.StatusCode)
+			assert.Equal(t, []string{"Location: https://first.com"}, resp.Headers)
+		},
+	},
+}
+
 var getSessionTests = []storageTest{
 	{
 		name: "get_session/valid_session",
 		action: func(t *testing.T, s Storage) {
 			t.Helper()
 			pubKey := testRSAKey(t)
-			aesKey, err := s.Register(t.Context(), "testcorrelationid001", pubKey, "secret1")
+			aesKey, err := s.Register(t.Context(), "testcorrelationid001", pubKey, "secret1", nil)
 			require.NoError(t, err)
 
 			handle, err := s.GetSession("testcorrelationid001", "secret1")
@@ -353,7 +416,7 @@ var getSessionTests = []storageTest{
 		name: "get_session/wrong_secret_key",
 		action: func(t *testing.T, s Storage) {
 			t.Helper()
-			_, err := s.Register(t.Context(), "testcorrelationid001", testRSAKey(t), "secret1")
+			_, err := s.Register(t.Context(), "testcorrelationid001", testRSAKey(t), "secret1", nil)
 			require.NoError(t, err)
 		},
 		assert: func(t *testing.T, s Storage) {
@@ -367,7 +430,7 @@ var getSessionTests = []storageTest{
 		name: "get_session/hit_counter_on_valid_access",
 		action: func(t *testing.T, s Storage) {
 			t.Helper()
-			_, err := s.Register(t.Context(), "testcorrelationid001", testRSAKey(t), "secret1")
+			_, err := s.Register(t.Context(), "testcorrelationid001", testRSAKey(t), "secret1", nil)
 			require.NoError(t, err)
 			_, err = s.GetSession("testcorrelationid001", "secret1")
 			require.NoError(t, err)
@@ -392,7 +455,7 @@ var getSessionTests = []storageTest{
 			baseTime := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
 			ms.clock = func() time.Time { return baseTime }
 
-			_, err := built.Register(t.Context(), "testcorrelationid001", pubKey, "secret1")
+			_, err := built.Register(t.Context(), "testcorrelationid001", pubKey, "secret1", nil)
 			require.NoError(t, err)
 			assert.Equal(t, uint64(1), built.SessionCount())
 
@@ -417,7 +480,7 @@ var getAndClearTests = []storageTest{
 		name: "get_and_clear/destructive_read",
 		action: func(t *testing.T, s Storage) {
 			t.Helper()
-			_, err := s.Register(t.Context(), "testcorrelationid001", testRSAKey(t), "secret1")
+			_, err := s.Register(t.Context(), "testcorrelationid001", testRSAKey(t), "secret1", nil)
 			require.NoError(t, err)
 			require.NoError(t, s.AppendInteraction("testcorrelationid001", []byte(`{"protocol":"http"}`)))
 			require.NoError(t, s.AppendInteraction("testcorrelationid001", []byte(`{"protocol":"dns"}`)))
@@ -456,7 +519,7 @@ var getAndClearTests = []storageTest{
 		name: "get_and_clear/empty_session",
 		action: func(t *testing.T, s Storage) {
 			t.Helper()
-			_, err := s.Register(t.Context(), "testcorrelationid001", testRSAKey(t), "secret1")
+			_, err := s.Register(t.Context(), "testcorrelationid001", testRSAKey(t), "secret1", nil)
 			require.NoError(t, err)
 		},
 		assert: func(t *testing.T, s Storage) {
@@ -479,7 +542,7 @@ var getAndClearTests = []storageTest{
 		name: "get_and_clear/wrong_secret",
 		action: func(t *testing.T, s Storage) {
 			t.Helper()
-			_, err := s.Register(t.Context(), "testcorrelationid001", testRSAKey(t), "secret1")
+			_, err := s.Register(t.Context(), "testcorrelationid001", testRSAKey(t), "secret1", nil)
 			require.NoError(t, err)
 			require.NoError(t, s.AppendInteraction("testcorrelationid001", []byte(`{"protocol":"http"}`)))
 
@@ -516,7 +579,7 @@ var getAndClearTests = []storageTest{
 			pubKey := testRSAKey(t)
 
 			if ds, ok := st.(*diskStorage); ok {
-				_, err := ds.Register(t.Context(), testCorrelationID, pubKey, "secret")
+				_, err := ds.Register(t.Context(), testCorrelationID, pubKey, "secret", nil)
 				require.NoError(t, err)
 				require.NoError(t, ds.AppendInteraction(testCorrelationID, []byte(`{"protocol":"http"}`)))
 
@@ -528,7 +591,7 @@ var getAndClearTests = []storageTest{
 				_, err = handle.GetAndClearInteractions()
 				require.EqualError(t, err, "storage closed")
 			} else {
-				_, err := st.Register(t.Context(), testCorrelationID, pubKey, "secret")
+				_, err := st.Register(t.Context(), testCorrelationID, pubKey, "secret", nil)
 				require.NoError(t, err)
 				require.NoError(t, st.AppendInteraction(testCorrelationID, []byte(`{"protocol":"http"}`)))
 				require.NoError(t, st.Close())
@@ -549,7 +612,7 @@ var appendTests = []storageTest{
 		action: func(t *testing.T, s Storage) {
 			t.Helper()
 			pubKey := testRSAKey(t)
-			_, err := s.Register(t.Context(), "testcorrelationid001", pubKey, "secret1")
+			_, err := s.Register(t.Context(), "testcorrelationid001", pubKey, "secret1", nil)
 			require.NoError(t, err)
 			require.NoError(t, s.AppendInteraction("testcorrelationid001", []byte(`{"protocol":"http"}`)))
 		},
@@ -585,7 +648,7 @@ var appendTests = []storageTest{
 		name: "append/concurrent_appends",
 		action: func(t *testing.T, s Storage) {
 			t.Helper()
-			_, err := s.Register(t.Context(), testCorrelationID, testRSAKey(t), "secret")
+			_, err := s.Register(t.Context(), testCorrelationID, testRSAKey(t), "secret", nil)
 			require.NoError(t, err)
 
 			var wg sync.WaitGroup
@@ -632,7 +695,7 @@ var appendTests = []storageTest{
 		action: func(t *testing.T, s Storage) {
 			t.Helper()
 			pubKey := testRSAKey(t)
-			_, err := s.Register(t.Context(), testCorrelationID, pubKey, "secret")
+			_, err := s.Register(t.Context(), testCorrelationID, pubKey, "secret", nil)
 			require.NoError(t, err)
 
 			const writers = 10
@@ -681,7 +744,7 @@ var deleteTests = []storageTest{
 		name: "delete/successful_delete",
 		action: func(t *testing.T, s Storage) {
 			t.Helper()
-			_, err := s.Register(t.Context(), "testcorrelationid001", testRSAKey(t), "secret1")
+			_, err := s.Register(t.Context(), "testcorrelationid001", testRSAKey(t), "secret1", nil)
 			require.NoError(t, err)
 			require.NoError(t, s.Delete("testcorrelationid001", "secret1"))
 		},
@@ -706,7 +769,7 @@ var deleteTests = []storageTest{
 		name: "delete/wrong_secret_on_delete",
 		action: func(t *testing.T, s Storage) {
 			t.Helper()
-			_, err := s.Register(t.Context(), "testcorrelationid001", testRSAKey(t), "secret1")
+			_, err := s.Register(t.Context(), "testcorrelationid001", testRSAKey(t), "secret1", nil)
 			require.NoError(t, err)
 			err = s.Delete("testcorrelationid001", "wrong-secret")
 			require.Error(t, err)
@@ -738,7 +801,7 @@ var deleteTests = []storageTest{
 		name: "delete/session_count_decrements",
 		action: func(t *testing.T, s Storage) {
 			t.Helper()
-			_, err := s.Register(t.Context(), "testcorrelationid001", testRSAKey(t), "secret1")
+			_, err := s.Register(t.Context(), "testcorrelationid001", testRSAKey(t), "secret1", nil)
 			require.NoError(t, err)
 			require.NoError(t, s.Delete("testcorrelationid001", "secret1"))
 		},
@@ -772,7 +835,7 @@ var deleteTests = []storageTest{
 			var evictedID string
 			ms.onEvict = func(cid string, _ *Session) { evictedID = cid }
 
-			_, err := s.Register(t.Context(), testCorrelationID, pubKey, "secret")
+			_, err := s.Register(t.Context(), testCorrelationID, pubKey, "secret", nil)
 			require.NoError(t, err)
 
 			err = s.Delete(testCorrelationID, "secret")
@@ -794,7 +857,7 @@ var hasCIDTests = []storageTest{
 		name: "has_cid/registered_id",
 		action: func(t *testing.T, s Storage) {
 			t.Helper()
-			_, err := s.Register(t.Context(), "testcorrelationid001", testRSAKey(t), "secret1")
+			_, err := s.Register(t.Context(), "testcorrelationid001", testRSAKey(t), "secret1", nil)
 			require.NoError(t, err)
 		},
 		assert: func(t *testing.T, s Storage) {
@@ -824,7 +887,7 @@ var hasCIDTests = []storageTest{
 			baseTime := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
 			ms.clock = func() time.Time { return baseTime }
 
-			_, err := built.Register(t.Context(), "testcorrelationid001", pubKey, "secret1")
+			_, err := built.Register(t.Context(), "testcorrelationid001", pubKey, "secret1", nil)
 			require.NoError(t, err)
 			assert.True(t, built.HasCorrelationID("testcorrelationid001"))
 
@@ -846,7 +909,7 @@ var evictionTests = []storageTest{
 			pubKey := testRSAKey(t)
 			for i := range 5 {
 				id := "testcorrelation" + string(rune('a'+i)) + "0000"
-				_, err := s.Register(t.Context(), id, pubKey, "secret")
+				_, err := s.Register(t.Context(), id, pubKey, "secret", nil)
 				require.NoError(t, err)
 			}
 			assert.Equal(t, uint64(5), s.SessionCount())
@@ -897,7 +960,7 @@ var evictionTests = []storageTest{
 			baseTime := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
 			ms.clock = func() time.Time { return baseTime }
 
-			_, err := built.Register(t.Context(), "testcorrelationid001", pubKey, "secret1")
+			_, err := built.Register(t.Context(), "testcorrelationid001", pubKey, "secret1", nil)
 			require.NoError(t, err)
 
 			// Advance 23 hours - not expired, access resets TTL
@@ -926,7 +989,7 @@ var evictionTests = []storageTest{
 			baseTime := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
 			ms.clock = func() time.Time { return baseTime }
 
-			_, err := built.Register(t.Context(), "testcorrelationid001", pubKey, "secret1")
+			_, err := built.Register(t.Context(), "testcorrelationid001", pubKey, "secret1", nil)
 			require.NoError(t, err)
 
 			// Access at 23h - still valid
@@ -957,7 +1020,7 @@ var evictionTests = []storageTest{
 			baseTime := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
 			ms.clock = func() time.Time { return baseTime }
 
-			_, err := built.Register(t.Context(), "testcorrelationid001", pubKey, "secret1")
+			_, err := built.Register(t.Context(), "testcorrelationid001", pubKey, "secret1", nil)
 			require.NoError(t, err)
 
 			// Way past TTL - but noEviction prevents expiry
@@ -973,15 +1036,15 @@ var evictionTests = []storageTest{
 			pubKey := testRSAKey(t)
 
 			// Register A, B, C in order
-			_, err := s.Register(t.Context(), "aaaaaaaaaaaaaaaaaaaa", pubKey, "secret")
+			_, err := s.Register(t.Context(), "aaaaaaaaaaaaaaaaaaaa", pubKey, "secret", nil)
 			require.NoError(t, err)
-			_, err = s.Register(t.Context(), "bbbbbbbbbbbbbbbbbbbb", pubKey, "secret")
+			_, err = s.Register(t.Context(), "bbbbbbbbbbbbbbbbbbbb", pubKey, "secret", nil)
 			require.NoError(t, err)
-			_, err = s.Register(t.Context(), "cccccccccccccccccccc", pubKey, "secret")
+			_, err = s.Register(t.Context(), "cccccccccccccccccccc", pubKey, "secret", nil)
 			require.NoError(t, err)
 
 			// Keep-alive A - promotes to back of LRU
-			_, err = s.Register(t.Context(), "aaaaaaaaaaaaaaaaaaaa", pubKey, "secret")
+			_, err = s.Register(t.Context(), "aaaaaaaaaaaaaaaaaaaa", pubKey, "secret", nil)
 			require.NoError(t, err)
 
 			// Evict LRU - should evict B (oldest non-promoted), not A
@@ -1024,7 +1087,7 @@ var evictionTests = []storageTest{
 			// Register 5 sessions
 			for i := range 5 {
 				id := fmt.Sprintf("cid_%020d", i)
-				_, err := built.Register(t.Context(), id, testRSAKey(t), "secret")
+				_, err := built.Register(t.Context(), id, testRSAKey(t), "secret", nil)
 				require.NoError(t, err)
 			}
 
@@ -1039,7 +1102,7 @@ var evictionTests = []storageTest{
 			}()
 			go func() {
 				defer wg.Done()
-				_, _ = built.Register(t.Context(), "newcid_00000000000000", newKey, "secret")
+				_, _ = built.Register(t.Context(), "newcid_00000000000000", newKey, "secret", nil)
 			}()
 			wg.Wait()
 
@@ -1062,7 +1125,7 @@ var evictionTests = []storageTest{
 			baseTime := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
 			ms.clock = func() time.Time { return baseTime }
 
-			aesKey, err := built.Register(t.Context(), testCorrelationID, pubKey, "secret")
+			aesKey, err := built.Register(t.Context(), testCorrelationID, pubKey, "secret", nil)
 			require.NoError(t, err)
 
 			// Advance to 23h and do concurrent keep-alives
@@ -1073,7 +1136,7 @@ var evictionTests = []storageTest{
 				wg.Add(1)
 				go func() {
 					defer wg.Done()
-					got, err := built.Register(t.Context(), testCorrelationID, pubKey, "secret")
+					got, err := built.Register(t.Context(), testCorrelationID, pubKey, "secret", nil)
 					if assert.NoError(t, err) {
 						assert.Equal(t, aesKey, got)
 					}
@@ -1105,7 +1168,7 @@ var evictionTests = []storageTest{
 			baseTime := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
 			ms.clock = func() time.Time { return baseTime }
 
-			_, err := built.Register(t.Context(), testCorrelationID, pubKey, "secret")
+			_, err := built.Register(t.Context(), testCorrelationID, pubKey, "secret", nil)
 			require.NoError(t, err)
 
 			// At exactly 24h: Sub == TTL, so > is false -> NOT expired
@@ -1124,7 +1187,7 @@ var evictionTests = []storageTest{
 		action: func(t *testing.T, s Storage) {
 			t.Helper()
 			pubKey := testRSAKey(t)
-			_, err := s.Register(t.Context(), "testcorrelationid001", pubKey, "secret1")
+			_, err := s.Register(t.Context(), "testcorrelationid001", pubKey, "secret1", nil)
 			require.NoError(t, err)
 			require.NoError(t, s.AppendInteraction("testcorrelationid001", []byte("data")))
 
@@ -1169,7 +1232,7 @@ var evictionTests = []storageTest{
 
 func buildStorageTestCases() []storageTest {
 	groups := [][]storageTest{
-		registerTests, getSessionTests, getAndClearTests,
+		registerTests, getResponseTests, getSessionTests, getAndClearTests,
 		appendTests, deleteTests, hasCIDTests,
 		evictionTests,
 	}

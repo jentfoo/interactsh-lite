@@ -48,7 +48,7 @@ func TestHandleMetrics(t *testing.T) {
 			"kkkkllllmmmmnnnnooooo",
 		}
 		for _, id := range ids {
-			_, err := srv.storage.Register(t.Context(), id, &key.PublicKey, "secret")
+			_, err := srv.storage.Register(t.Context(), id, &key.PublicKey, "secret", nil)
 			require.NoError(t, err)
 		}
 
@@ -71,7 +71,7 @@ func TestHandleMetrics(t *testing.T) {
 		key := testRSAKeyPair(t)
 		const id = "abcdefghij0123456789"
 
-		_, err := srv.storage.Register(t.Context(), id, &key.PublicKey, "secret")
+		_, err := srv.storage.Register(t.Context(), id, &key.PublicKey, "secret", nil)
 		require.NoError(t, err)
 
 		// Hit: valid lookup
@@ -168,7 +168,7 @@ func TestHandleMetrics(t *testing.T) {
 		})
 		pubKey := testRSAKey(t)
 
-		_, err := srv.storage.Register(t.Context(), testCorrelationID, pubKey, "secret")
+		_, err := srv.storage.Register(t.Context(), testCorrelationID, pubKey, "secret", nil)
 		require.NoError(t, err)
 
 		// Force eviction via internal API

@@ -97,7 +97,7 @@ func TestOnSMTPData(t *testing.T) {
 	t.Run("stores_correlation_match", func(t *testing.T) {
 		srv := testServerWithStorage(t)
 		pubKey := testRSAKey(t)
-		aesKey, err := srv.storage.Register(t.Context(), testCorrelationID, pubKey, "secret")
+		aesKey, err := srv.storage.Register(t.Context(), testCorrelationID, pubKey, "secret", nil)
 		require.NoError(t, err)
 
 		rcpt := "user@" + testCorrelationID + testNonce + "." + testDomain
@@ -125,7 +125,7 @@ func TestOnSMTPData(t *testing.T) {
 	t.Run("unconfigured_domain", func(t *testing.T) {
 		srv := testServerWithStorage(t)
 		pubKey := testRSAKey(t)
-		_, err := srv.storage.Register(t.Context(), testCorrelationID, pubKey, "secret")
+		_, err := srv.storage.Register(t.Context(), testCorrelationID, pubKey, "secret", nil)
 		require.NoError(t, err)
 
 		rcpt := "user@" + testCorrelationID + testNonce + ".other.org"
@@ -141,9 +141,9 @@ func TestOnSMTPData(t *testing.T) {
 		pubKey := testRSAKey(t)
 		cid1 := testCorrelationID
 		cid2 := testCorrelationID2
-		aesKey1, err := srv.storage.Register(t.Context(), cid1, pubKey, "s1")
+		aesKey1, err := srv.storage.Register(t.Context(), cid1, pubKey, "s1", nil)
 		require.NoError(t, err)
-		aesKey2, err := srv.storage.Register(t.Context(), cid2, pubKey, "s2")
+		aesKey2, err := srv.storage.Register(t.Context(), cid2, pubKey, "s2", nil)
 		require.NoError(t, err)
 
 		rcpt1 := "a@" + cid1 + testNonce + "." + testDomain
@@ -173,7 +173,7 @@ func TestOnSMTPData(t *testing.T) {
 	t.Run("same_cid_per_recipient", func(t *testing.T) {
 		srv := testServerWithStorage(t)
 		pubKey := testRSAKey(t)
-		aesKey, err := srv.storage.Register(t.Context(), testCorrelationID, pubKey, "secret")
+		aesKey, err := srv.storage.Register(t.Context(), testCorrelationID, pubKey, "secret", nil)
 		require.NoError(t, err)
 
 		const nonce1 = "aaa"
@@ -201,7 +201,7 @@ func TestOnSMTPData(t *testing.T) {
 	t.Run("no_at_in_recipient", func(t *testing.T) {
 		srv := testServerWithStorage(t)
 		pubKey := testRSAKey(t)
-		_, err := srv.storage.Register(t.Context(), testCorrelationID, pubKey, "secret")
+		_, err := srv.storage.Register(t.Context(), testCorrelationID, pubKey, "secret", nil)
 		require.NoError(t, err)
 
 		srv.onSMTPData("from@example.com", []string{"no-domain"}, []byte("body"), "1.2.3.4:25")
@@ -214,7 +214,7 @@ func TestOnSMTPData(t *testing.T) {
 	t.Run("domain_case_insensitive", func(t *testing.T) {
 		srv := testServerWithStorage(t)
 		pubKey := testRSAKey(t)
-		aesKey, err := srv.storage.Register(t.Context(), testCorrelationID, pubKey, "secret")
+		aesKey, err := srv.storage.Register(t.Context(), testCorrelationID, pubKey, "secret", nil)
 		require.NoError(t, err)
 
 		rcpt := "user@" + testCorrelationID + testNonce + ".TEST.COM"
@@ -259,7 +259,7 @@ func TestOnSMTPData(t *testing.T) {
 		srv := testServerWithStorage(t)
 		pubKey := testRSAKey(t)
 
-		_, err := srv.storage.Register(t.Context(), testCorrelationID, pubKey, "secret")
+		_, err := srv.storage.Register(t.Context(), testCorrelationID, pubKey, "secret", nil)
 		require.NoError(t, err)
 
 		srv.onSMTPData("sender@test.com", []string{}, []byte("body"), "10.0.0.1:1234")
@@ -274,7 +274,7 @@ func TestOnSMTPData(t *testing.T) {
 		srv := testServerWithStorage(t)
 		pubKey := testRSAKey(t)
 
-		aesKey, err := srv.storage.Register(t.Context(), testCorrelationID, pubKey, "secret")
+		aesKey, err := srv.storage.Register(t.Context(), testCorrelationID, pubKey, "secret", nil)
 		require.NoError(t, err)
 
 		srv.onSMTPData("sender@test.com",
@@ -497,7 +497,7 @@ func TestSMTPServer(t *testing.T) {
 	t.Run("captures_interaction_via_data", func(t *testing.T) {
 		srv := testServerWithStorage(t)
 		pubKey := testRSAKey(t)
-		aesKey, err := srv.storage.Register(t.Context(), testCorrelationID, pubKey, "secret")
+		aesKey, err := srv.storage.Register(t.Context(), testCorrelationID, pubKey, "secret", nil)
 		require.NoError(t, err)
 
 		addr, cleanup := smtpTestServer(t, srv, nil, false)
@@ -550,7 +550,7 @@ func TestSMTPServer(t *testing.T) {
 		srv := testServerWithStorage(t)
 		pubKey := testRSAKey(t)
 
-		_, err := srv.storage.Register(t.Context(), testCorrelationID, pubKey, "secret")
+		_, err := srv.storage.Register(t.Context(), testCorrelationID, pubKey, "secret", nil)
 		require.NoError(t, err)
 
 		addr, cleanup := smtpTestServer(t, srv, nil, false)
@@ -612,7 +612,8 @@ func TestTeeConn(t *testing.T) {
 		}()
 
 		buf := make([]byte, 64)
-		n, _ := tc.Read(buf)
+		n, err := tc.Read(buf)
+		require.NoError(t, err)
 		assert.Equal(t, "EHLO test\r\n", string(buf[:n]))
 		assert.Equal(t, "EHLO test\r\n", tc.buf.String())
 	})
@@ -657,9 +658,11 @@ func TestTeeConn(t *testing.T) {
 		}()
 
 		buf := make([]byte, 64)
-		_, _ = tc.Read(buf)
+		_, err := tc.Read(buf)
+		require.NoError(t, err)
 		tc.Reset()
-		n, _ := tc.Read(buf)
+		n, err := tc.Read(buf)
+		require.NoError(t, err)
 		assert.Equal(t, "second", string(buf[:n]))
 		assert.Equal(t, "second", tc.buf.String())
 	})
@@ -676,11 +679,13 @@ func TestTeeConn(t *testing.T) {
 		}()
 
 		buf := make([]byte, 64)
-		_, _ = tc.Read(buf)
+		_, err := tc.Read(buf)
+		require.NoError(t, err)
 		assert.Equal(t, "before", tc.buf.String())
 
 		tc.stopped = true
-		n, _ := tc.Read(buf)
+		n, err := tc.Read(buf)
+		require.NoError(t, err)
 		assert.Equal(t, "after", string(buf[:n]))
 		assert.Equal(t, "before", tc.buf.String()) // unchanged
 	})
@@ -697,14 +702,16 @@ func TestTeeConn(t *testing.T) {
 		}()
 
 		buf := make([]byte, 64)
-		_, _ = tc.Read(buf)
+		_, err := tc.Read(buf)
+		require.NoError(t, err)
 		tc.stopped = true
 		tc.Reset()
 
 		assert.False(t, tc.stopped)
 		assert.Equal(t, 0, tc.buf.Len())
 
-		n, _ := tc.Read(buf)
+		n, err := tc.Read(buf)
+		require.NoError(t, err)
 		assert.Equal(t, "two", string(buf[:n]))
 		assert.Equal(t, "two", tc.buf.String())
 	})
@@ -835,7 +842,7 @@ func TestSMTPRawEnvelopePreservation(t *testing.T) {
 	t.Run("quoted_local_part_preserved", func(t *testing.T) {
 		srv := testServerWithStorage(t)
 		pubKey := testRSAKey(t)
-		aesKey, err := srv.storage.Register(t.Context(), testCorrelationID, pubKey, "secret")
+		aesKey, err := srv.storage.Register(t.Context(), testCorrelationID, pubKey, "secret", nil)
 		require.NoError(t, err)
 
 		addr, cleanup := smtpTestServer(t, srv, nil, false)
@@ -847,7 +854,8 @@ func TestSMTPRawEnvelopePreservation(t *testing.T) {
 
 		reader := bufio.NewReader(conn)
 		readLine := func() string {
-			line, _ := reader.ReadString('\n')
+			line, err := reader.ReadString('\n')
+			require.NoError(t, err)
 			return line
 		}
 		writeLine := func(s string) {
@@ -896,7 +904,7 @@ func TestSMTPRawEnvelopePreservation(t *testing.T) {
 	t.Run("standard_address_unchanged", func(t *testing.T) {
 		srv := testServerWithStorage(t)
 		pubKey := testRSAKey(t)
-		aesKey, err := srv.storage.Register(t.Context(), testCorrelationID, pubKey, "secret")
+		aesKey, err := srv.storage.Register(t.Context(), testCorrelationID, pubKey, "secret", nil)
 		require.NoError(t, err)
 
 		addr, cleanup := smtpTestServer(t, srv, nil, false)

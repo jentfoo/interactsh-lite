@@ -70,7 +70,7 @@ func BenchmarkHTTPPollEmpty(b *testing.B) {
 	key := benchRSAKeyPair(b)
 
 	const cid = "benchpollempty000000"
-	_, err := srv.storage.Register(b.Context(), cid, &key.PublicKey, "secret")
+	_, err := srv.storage.Register(b.Context(), cid, &key.PublicKey, "secret", nil)
 	require.NoError(b, err)
 	const pollURL = "/poll?id=" + cid + "&secret=secret"
 
@@ -88,7 +88,7 @@ func BenchmarkMemHTTPPollWithEvents(b *testing.B) {
 			key := benchRSAKeyPair(b)
 
 			const cid = "benchpollwithevents0"
-			aesKey, err := srv.storage.Register(b.Context(), cid, &key.PublicKey, "secret")
+			aesKey, err := srv.storage.Register(b.Context(), cid, &key.PublicKey, "secret", nil)
 			require.NoError(b, err)
 
 			// Pre-encrypt interactions once, then clone into session each iteration
@@ -117,9 +117,10 @@ func BenchmarkHTTPDeregister(b *testing.B) {
 	bodies := make([][]byte, b.N)
 	for i := range bodies {
 		cid := uniqueCID(i)
-		_, err := srv.storage.Register(b.Context(), cid, &key.PublicKey, "secret")
+		_, err := srv.storage.Register(b.Context(), cid, &key.PublicKey, "secret", nil)
 		require.NoError(b, err)
-		bodies[i], _ = json.Marshal(deregisterRequest{CorrelationID: cid, SecretKey: "secret"})
+		bodies[i], err = json.Marshal(deregisterRequest{CorrelationID: cid, SecretKey: "secret"})
+		require.NoError(b, err)
 	}
 
 	b.ResetTimer()
@@ -134,7 +135,7 @@ func BenchmarkHTTPCaptureAndPoll(b *testing.B) {
 	key := benchRSAKeyPair(b)
 
 	const cid = "benchcapturepoll0000"
-	_, err := srv.storage.Register(b.Context(), cid, &key.PublicKey, "secret")
+	_, err := srv.storage.Register(b.Context(), cid, &key.PublicKey, "secret", nil)
 	require.NoError(b, err)
 
 	const host = cid + "nop." + testDomain
@@ -166,7 +167,7 @@ func BenchmarkStorageRegister(b *testing.B) {
 
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
-			_, _ = ms.Register(b.Context(), uniqueCID(i), &key.PublicKey, "secret")
+			_, _ = ms.Register(b.Context(), uniqueCID(i), &key.PublicKey, "secret", nil)
 		}
 	}
 
@@ -187,12 +188,12 @@ func BenchmarkStorageRegisterKeepAlive(b *testing.B) {
 		ms := benchStorage(b, memStorage)
 
 		const cid = "benchstorekeepalive0"
-		_, err := ms.Register(b.Context(), cid, &key.PublicKey, "secret")
+		_, err := ms.Register(b.Context(), cid, &key.PublicKey, "secret", nil)
 		require.NoError(b, err)
 
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
-			_, _ = ms.Register(b.Context(), cid, &key.PublicKey, "secret")
+			_, _ = ms.Register(b.Context(), cid, &key.PublicKey, "secret", nil)
 		}
 	}
 
@@ -212,7 +213,7 @@ func BenchmarkMemStorageGetAndClearInteractions(b *testing.B) {
 			ms := benchMemoryStorage(b)
 
 			const cid = "benchstoreclear00000"
-			aesKey, err := ms.Register(b.Context(), cid, &key.PublicKey, "secret")
+			aesKey, err := ms.Register(b.Context(), cid, &key.PublicKey, "secret", nil)
 			require.NoError(b, err)
 
 			// Pre-encrypt once, clone each iteration
@@ -235,7 +236,7 @@ func BenchmarkStorageHasCorrelationID(b *testing.B) {
 	s := benchStorage(b, true) // just memstorage tested since disk defers to mem
 
 	const cid = "benchstorehas0000000"
-	_, err := s.Register(b.Context(), cid, &key.PublicKey, "secret")
+	_, err := s.Register(b.Context(), cid, &key.PublicKey, "secret", nil)
 	require.NoError(b, err)
 
 	b.Run("hit", func(b *testing.B) {
@@ -260,7 +261,8 @@ func BenchmarkStorageDelete(b *testing.B) {
 
 		// Pre-register all sessions before measuring deletion
 		for i := 0; i < b.N; i++ {
-			_, _ = s.Register(b.Context(), uniqueCID(i), &key.PublicKey, "secret")
+			_, err := s.Register(b.Context(), uniqueCID(i), &key.PublicKey, "secret", nil)
+			require.NoError(b, err)
 		}
 
 		b.ResetTimer()
@@ -407,7 +409,7 @@ func BenchmarkConcurrentCaptureAndPoll(b *testing.B) {
 		for i := range sessions {
 			cid := fmt.Sprintf("benchconc%011d", i)
 			key := benchRSAKeyPair(b)
-			_, err := srv.storage.Register(b.Context(), cid, &key.PublicKey, "secret")
+			_, err := srv.storage.Register(b.Context(), cid, &key.PublicKey, "secret", nil)
 			require.NoError(b, err)
 			sessions[i] = workerSession{
 				cid:     cid,

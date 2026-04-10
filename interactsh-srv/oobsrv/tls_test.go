@@ -215,7 +215,8 @@ func TestCertReloader(t *testing.T) {
 		require.NoError(t, r.Start())
 		t.Cleanup(func() { _ = r.Close() })
 
-		origCert, _ := r.GetCertificate(nil)
+		origCert, err := r.GetCertificate(nil)
+		require.NoError(t, err)
 		origDER := origCert.Certificate[0]
 
 		generateTestCert(t, dir) // Overwrite with a new cert (new random key = different DER)
@@ -237,11 +238,13 @@ func TestCertReloader(t *testing.T) {
 		require.NoError(t, r.Start())
 		t.Cleanup(func() { _ = r.Close() })
 
-		origCert, _ := r.GetCertificate(nil)
+		origCert, err := r.GetCertificate(nil)
+		require.NoError(t, err)
 
 		time.Sleep(50 * time.Millisecond) // Wait for several tick cycles
 
-		curr, _ := r.GetCertificate(nil)
+		curr, err := r.GetCertificate(nil)
+		require.NoError(t, err)
 		assert.Same(t, origCert, curr)
 	})
 
@@ -281,7 +284,8 @@ func TestLatestModTime(t *testing.T) {
 		mt, err := latestModTime(older, newer)
 		require.NoError(t, err)
 
-		newerInfo, _ := os.Stat(newer)
+		newerInfo, err := os.Stat(newer)
+		require.NoError(t, err)
 		assert.Equal(t, newerInfo.ModTime(), mt)
 	})
 

@@ -50,7 +50,7 @@ func TestCaptureLDAPSearchInteraction(t *testing.T) {
 	t.Run("stores_correlation_match", func(t *testing.T) {
 		srv := testServerWithStorage(t)
 		pubKey := testRSAKey(t)
-		aesKey, err := srv.storage.Register(t.Context(), testCorrelationID, pubKey, "secret")
+		aesKey, err := srv.storage.Register(t.Context(), testCorrelationID, pubKey, "secret", nil)
 		require.NoError(t, err)
 
 		baseDN := "dc=" + testCorrelationID + testNonce + ",dc=test,dc=com"
@@ -77,7 +77,7 @@ func TestCaptureLDAPSearchInteraction(t *testing.T) {
 	t.Run("no_match_no_storage", func(t *testing.T) {
 		srv := testServerWithStorage(t)
 		pubKey := testRSAKey(t)
-		_, err := srv.storage.Register(t.Context(), testCorrelationID, pubKey, "secret")
+		_, err := srv.storage.Register(t.Context(), testCorrelationID, pubKey, "secret", nil)
 		require.NoError(t, err)
 
 		const baseDN = "dc=unrelated,dc=org"
@@ -91,7 +91,7 @@ func TestCaptureLDAPSearchInteraction(t *testing.T) {
 	t.Run("cid_with_domain_suffix", func(t *testing.T) {
 		srv := testServerWithStorage(t)
 		pubKey := testRSAKey(t)
-		aesKey, err := srv.storage.Register(t.Context(), testCorrelationID, pubKey, "secret")
+		aesKey, err := srv.storage.Register(t.Context(), testCorrelationID, pubKey, "secret", nil)
 		require.NoError(t, err)
 
 		baseDN := "dc=" + testCorrelationID + testNonce + ".test.com"
@@ -190,7 +190,7 @@ func TestLDAPServer(t *testing.T) {
 	t.Run("captures_search_interaction", func(t *testing.T) {
 		srv := testServerWithStorage(t)
 		pubKey := testRSAKey(t)
-		aesKey, err := srv.storage.Register(t.Context(), testCorrelationID, pubKey, "secret")
+		aesKey, err := srv.storage.Register(t.Context(), testCorrelationID, pubKey, "secret", nil)
 		require.NoError(t, err)
 
 		addr := ldapTestServer(t, srv)
@@ -436,7 +436,7 @@ func TestLDAPServer(t *testing.T) {
 		})
 		pubKey := testRSAKey(t)
 
-		_, err := srv.storage.Register(t.Context(), testCorrelationID, pubKey, "secret")
+		_, err := srv.storage.Register(t.Context(), testCorrelationID, pubKey, "secret", nil)
 		require.NoError(t, err)
 
 		addr := ldapTestServer(t, srv)

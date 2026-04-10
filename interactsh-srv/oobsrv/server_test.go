@@ -241,7 +241,7 @@ func TestCaptureInteraction(t *testing.T) {
 		require.NoError(t, err)
 
 		pubKey := testRSAKey(t)
-		aesKey, err := srv.storage.Register(t.Context(), testCorrelationID, pubKey, "secret")
+		aesKey, err := srv.storage.Register(t.Context(), testCorrelationID, pubKey, "secret", nil)
 		require.NoError(t, err)
 
 		// CID embedded in HTTP-style text (not DNS labels)
@@ -306,9 +306,9 @@ func TestCaptureInteraction(t *testing.T) {
 
 		pubKey := testRSAKey(t)
 
-		_, err = srv.storage.Register(t.Context(), testCorrelationID, pubKey, "secret")
+		_, err = srv.storage.Register(t.Context(), testCorrelationID, pubKey, "secret", nil)
 		require.NoError(t, err)
-		_, err = srv.storage.Register(t.Context(), testCorrelationID2, pubKey, "secret")
+		_, err = srv.storage.Register(t.Context(), testCorrelationID2, pubKey, "secret", nil)
 		require.NoError(t, err)
 
 		matchInput := testCorrelationID + "nop." + testCorrelationID2 + "abc.test.com"
