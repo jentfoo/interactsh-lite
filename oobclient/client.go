@@ -87,6 +87,7 @@ type Client struct {
 	keepAliveCancel     context.CancelFunc
 	keepAliveInterval   time.Duration
 	disableHTTPFallback bool
+	response            *ResponseConfig
 }
 
 // New creates and registers a new client with an interactsh server.
@@ -180,6 +181,7 @@ func New(ctx context.Context, opts ...Options) (*Client, error) {
 		publicKeyB64:             publicKeyB64,
 		keepAliveInterval:        keepAliveInterval,
 		disableHTTPFallback:      opt.DisableHTTPFallback,
+		response:                 opt.Response,
 		httpClient:               httpClient,
 		correlationIDNonceLength: correlationIDNonceLength,
 		state:                    stateIdle,
@@ -278,6 +280,7 @@ func (c *Client) performRegistration(ctx context.Context, serverURL *url.URL) er
 		PublicKey:     c.publicKeyB64,
 		SecretKey:     c.secretKey,
 		CorrelationID: c.correlationID,
+		Response:      c.response,
 	}
 
 	data, err := json.Marshal(reqBody)
@@ -383,7 +386,9 @@ func (c *Client) ServerHost() string {
 }
 
 // EncodedResponse returns an HTTP URL with dynamic response query parameters.
-// Requires -dynamic-resp on the server. Zero values omit parameters.
+// Requires --dynamic-resp on the server. On unauthenticated servers with
+// --dynamic-resp, only 302/307 redirects with a Location header are served;
+// other configurations are silently ignored. Zero values omit parameters.
 func (c *Client) EncodedResponse(statusCode int, headers []string, body string) string {
 	params := url.Values{}
 	if statusCode != 0 {
@@ -794,9 +799,10 @@ func LoadSession(ctx context.Context, path string, opts ...Options) (*Client, er
 // Internal types for JSON serialization
 
 type registerRequest struct {
-	PublicKey     string `json:"public-key"`
-	SecretKey     string `json:"secret-key"`
-	CorrelationID string `json:"correlation-id"`
+	PublicKey     string          `json:"public-key"`
+	SecretKey     string          `json:"secret-key"`
+	CorrelationID string          `json:"correlation-id"`
+	Response      *ResponseConfig `json:"response,omitempty"`
 }
 
 type deregisterRequest struct {

@@ -10,6 +10,35 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestResponseConfig_IsAllowedUnauthenticated(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		cfg  *ResponseConfig
+		want bool
+	}{
+		{"nil_config", nil, true},
+		{"valid_302_redirect", &ResponseConfig{StatusCode: 302, Headers: []string{"Location: https://example.com"}}, true},
+		{"valid_307_redirect", &ResponseConfig{StatusCode: 307, Headers: []string{"Location: https://example.com"}}, true},
+		{"wrong_status_200", &ResponseConfig{StatusCode: 200, Headers: []string{"Location: https://example.com"}}, false},
+		{"wrong_status_301", &ResponseConfig{StatusCode: 301, Headers: []string{"Location: https://example.com"}}, false},
+		{"no_location", &ResponseConfig{StatusCode: 302, Headers: []string{"Content-Type: text/html"}}, false},
+		{"empty_headers", &ResponseConfig{StatusCode: 307}, false},
+		{"zero_status", &ResponseConfig{Headers: []string{"Location: https://example.com"}}, false},
+		{"case_insensitive", &ResponseConfig{StatusCode: 302, Headers: []string{"LOCATION: https://example.com"}}, true},
+		{"extra_header_rejected", &ResponseConfig{StatusCode: 302, Headers: []string{"Location: https://example.com", "X-Extra: val"}}, false},
+		{"malformed_header", &ResponseConfig{StatusCode: 302, Headers: []string{"no-colon"}}, false},
+		{"redirect_with_body", &ResponseConfig{StatusCode: 302, Headers: []string{"Location: https://example.com"}, Body: "redirecting..."}, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, tt.cfg.IsAllowedUnauthenticated())
+		})
+	}
+}
+
 func TestDefaultOptions(t *testing.T) {
 	t.Parallel()
 

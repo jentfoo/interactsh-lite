@@ -4,8 +4,41 @@ import (
 	"net"
 	"net/http"
 	"runtime/debug"
+	"strings"
 	"time"
 )
+
+// ResponseConfig defines an HTTP response served for interactions matching a
+// session's correlation ID. Supported only by the interactsh-lite server.
+// On unauthenticated servers, only 302/307 redirects with a Location header are allowed.
+type ResponseConfig struct {
+	StatusCode int      `json:"status-code,omitempty"` // HTTP status code
+	Headers    []string `json:"headers,omitempty"`     // "Name: Value" format
+	Body       string   `json:"body,omitempty"`        // response body
+}
+
+// IsAllowedUnauthenticated reports whether this config is valid for an unauthenticated server.
+func (c *ResponseConfig) IsAllowedUnauthenticated() bool {
+	if c == nil {
+		return true
+	}
+	if c.StatusCode != 302 && c.StatusCode != 307 {
+		return false
+	} else if c.Body != "" {
+		return false
+	}
+	var hasLocation bool
+	for _, h := range c.Headers {
+		name, _, ok := strings.Cut(h, ":")
+		if !ok {
+			return false
+		} else if !strings.EqualFold(strings.TrimSpace(name), "location") {
+			return false
+		}
+		hasLocation = true
+	}
+	return hasLocation
+}
 
 var Version = "dev"
 
@@ -47,6 +80,11 @@ type Options struct {
 	// DisableHTTPFallback prevents falling back to HTTP if HTTPS fails.
 	// Default: false (fallback enabled)
 	DisableHTTPFallback bool
+
+	// Response configures a stored HTTP response served for
+	// interactions matching this session's correlation ID.
+	// Supported only by the interactsh-lite server implementation.
+	Response *ResponseConfig
 
 	// CorrelationIdLength is the length of the correlation ID preamble.
 	// Must match server configuration exactly. Cannot be customized with default servers.

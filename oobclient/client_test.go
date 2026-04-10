@@ -981,7 +981,8 @@ func TestPollInteractions(t *testing.T) {
 		}))
 		t.Cleanup(server.Close)
 
-		parsed, _ := url.Parse(server.URL)
+		parsed, err := url.Parse(server.URL)
+		require.NoError(t, err)
 		client := &Client{
 			serverURL:     parsed,
 			token:         "my-secret-token",
@@ -990,7 +991,7 @@ func TestPollInteractions(t *testing.T) {
 			secretKey:     "testsecret",
 		}
 
-		err := client.pollInteractions(t.Context(), func(*Interaction) {})
+		err = client.pollInteractions(t.Context(), func(*Interaction) {})
 		require.NoError(t, err)
 		assert.Equal(t, "my-secret-token", receivedToken)
 	})
@@ -1001,13 +1002,14 @@ func TestPollInteractions(t *testing.T) {
 		}))
 		t.Cleanup(server.Close)
 
-		parsed, _ := url.Parse(server.URL)
+		parsed, err := url.Parse(server.URL)
+		require.NoError(t, err)
 		client := &Client{
 			serverURL:  parsed,
 			httpClient: newSecureHTTPClient(time.Second),
 		}
 
-		err := client.pollInteractions(t.Context(), func(*Interaction) {})
+		err = client.pollInteractions(t.Context(), func(*Interaction) {})
 		assert.ErrorIs(t, err, ErrUnauthorized)
 	})
 
@@ -1018,13 +1020,14 @@ func TestPollInteractions(t *testing.T) {
 		}))
 		t.Cleanup(server.Close)
 
-		parsed, _ := url.Parse(server.URL)
+		parsed, err := url.Parse(server.URL)
+		require.NoError(t, err)
 		client := &Client{
 			serverURL:  parsed,
 			httpClient: newSecureHTTPClient(time.Second),
 		}
 
-		err := client.pollInteractions(t.Context(), func(*Interaction) {})
+		err = client.pollInteractions(t.Context(), func(*Interaction) {})
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "poll failed with status 500")
 		assert.Contains(t, err.Error(), "internal failure")
@@ -1037,13 +1040,14 @@ func TestPollInteractions(t *testing.T) {
 		}))
 		t.Cleanup(server.Close)
 
-		parsed, _ := url.Parse(server.URL)
+		parsed, err := url.Parse(server.URL)
+		require.NoError(t, err)
 		client := &Client{
 			serverURL:  parsed,
 			httpClient: newSecureHTTPClient(time.Second),
 		}
 
-		err := client.pollInteractions(t.Context(), func(*Interaction) {})
+		err = client.pollInteractions(t.Context(), func(*Interaction) {})
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "failed to decode poll response")
 	})
@@ -1060,14 +1064,15 @@ func TestPollInteractions(t *testing.T) {
 		}))
 		t.Cleanup(server.Close)
 
-		parsed, _ := url.Parse(server.URL)
+		parsed, err := url.Parse(server.URL)
+		require.NoError(t, err)
 		client := &Client{
 			serverURL:  parsed,
 			httpClient: newSecureHTTPClient(time.Second),
 		}
 
 		var received []*Interaction
-		err := client.pollInteractions(t.Context(), func(i *Interaction) {
+		err = client.pollInteractions(t.Context(), func(i *Interaction) {
 			received = append(received, i)
 		})
 		require.NoError(t, err)
@@ -1088,14 +1093,15 @@ func TestPollInteractions(t *testing.T) {
 		}))
 		t.Cleanup(server.Close)
 
-		parsed, _ := url.Parse(server.URL)
+		parsed, err := url.Parse(server.URL)
+		require.NoError(t, err)
 		client := &Client{
 			serverURL:  parsed,
 			httpClient: newSecureHTTPClient(time.Second),
 		}
 
 		var received []*Interaction
-		err := client.pollInteractions(t.Context(), func(i *Interaction) {
+		err = client.pollInteractions(t.Context(), func(i *Interaction) {
 			received = append(received, i)
 		})
 		require.NoError(t, err)
@@ -1207,13 +1213,14 @@ func TestPerformRegistration(t *testing.T) {
 		}))
 		t.Cleanup(server.Close)
 
-		parsed, _ := url.Parse(server.URL)
+		parsed, err := url.Parse(server.URL)
+		require.NoError(t, err)
 		client := &Client{
 			publicKeyB64: "dGVzdA==",
 			httpClient:   newSecureHTTPClient(time.Second),
 		}
 
-		err := client.performRegistration(t.Context(), parsed)
+		err = client.performRegistration(t.Context(), parsed)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "registration failed with status 503")
 		assert.Contains(t, err.Error(), "server overloaded")
@@ -1226,13 +1233,14 @@ func TestPerformRegistration(t *testing.T) {
 		}))
 		t.Cleanup(server.Close)
 
-		parsed, _ := url.Parse(server.URL)
+		parsed, err := url.Parse(server.URL)
+		require.NoError(t, err)
 		client := &Client{
 			publicKeyB64: "dGVzdA==",
 			httpClient:   newSecureHTTPClient(time.Second),
 		}
 
-		err := client.performRegistration(t.Context(), parsed)
+		err = client.performRegistration(t.Context(), parsed)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "failed to decode registration response")
 	})
@@ -1244,13 +1252,14 @@ func TestPerformRegistration(t *testing.T) {
 		}))
 		t.Cleanup(server.Close)
 
-		parsed, _ := url.Parse(server.URL)
+		parsed, err := url.Parse(server.URL)
+		require.NoError(t, err)
 		client := &Client{
 			publicKeyB64: "dGVzdA==",
 			httpClient:   newSecureHTTPClient(time.Second),
 		}
 
-		err := client.performRegistration(t.Context(), parsed)
+		err = client.performRegistration(t.Context(), parsed)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "unexpected registration response")
 	})
@@ -1727,7 +1736,11 @@ func TestPollingWithEncryptedData(t *testing.T) {
 					FullId:        "encrypted123.example.com",
 					RemoteAddress: "5.6.7.8",
 				}
-				plaintext, _ := json.Marshal(interaction)
+				plaintext, err := json.Marshal(interaction)
+				if err != nil {
+					w.WriteHeader(http.StatusInternalServerError)
+					return
+				}
 
 				// Encrypt with AES-256-CTR
 				aesKey := make([]byte, 32)
@@ -1736,7 +1749,11 @@ func TestPollingWithEncryptedData(t *testing.T) {
 				iv := make([]byte, aes.BlockSize)
 				_, _ = rand.Read(iv)
 
-				block, _ := aes.NewCipher(aesKey)
+				block, err := aes.NewCipher(aesKey)
+				if err != nil {
+					w.WriteHeader(http.StatusInternalServerError)
+					return
+				}
 				ciphertext := make([]byte, len(plaintext))
 				stream := cipher.NewCTR(block, iv)
 				stream.XORKeyStream(ciphertext, plaintext)
@@ -1744,7 +1761,11 @@ func TestPollingWithEncryptedData(t *testing.T) {
 				fullCiphertext := append(iv, ciphertext...)
 
 				// Encrypt AES key with client's RSA public key
-				encryptedKey, _ := rsa.EncryptOAEP(sha256.New(), rand.Reader, pubKey, aesKey, nil)
+				encryptedKey, err := rsa.EncryptOAEP(sha256.New(), rand.Reader, pubKey, aesKey, nil)
+				if err != nil {
+					w.WriteHeader(http.StatusInternalServerError)
+					return
+				}
 
 				aesKeyB64 := base64.StdEncoding.EncodeToString(encryptedKey)
 				ciphertextB64 := base64.StdEncoding.EncodeToString(fullCiphertext)
@@ -1904,7 +1925,11 @@ func TestPollingWithEncryptedData(t *testing.T) {
 					RemoteAddress: "1.2.3.4",
 				}
 				// Append trailing whitespace to JSON
-				plaintext, _ := json.Marshal(interaction)
+				plaintext, err := json.Marshal(interaction)
+				if err != nil {
+					w.WriteHeader(http.StatusInternalServerError)
+					return
+				}
 				plaintext = append(plaintext, "\n\t \r\n"...)
 
 				// Encrypt with AES-256-CTR
@@ -1914,14 +1939,22 @@ func TestPollingWithEncryptedData(t *testing.T) {
 				iv := make([]byte, aes.BlockSize)
 				_, _ = rand.Read(iv)
 
-				block, _ := aes.NewCipher(aesKey)
+				block, err := aes.NewCipher(aesKey)
+				if err != nil {
+					w.WriteHeader(http.StatusInternalServerError)
+					return
+				}
 				ciphertext := make([]byte, len(plaintext))
 				stream := cipher.NewCTR(block, iv)
 				stream.XORKeyStream(ciphertext, plaintext)
 
 				fullCiphertext := append(iv, ciphertext...)
 
-				encryptedKey, _ := rsa.EncryptOAEP(sha256.New(), rand.Reader, pubKey, aesKey, nil)
+				encryptedKey, err := rsa.EncryptOAEP(sha256.New(), rand.Reader, pubKey, aesKey, nil)
+				if err != nil {
+					w.WriteHeader(http.StatusInternalServerError)
+					return
+				}
 
 				aesKeyB64 := base64.StdEncoding.EncodeToString(encryptedKey)
 				ciphertextB64 := base64.StdEncoding.EncodeToString(fullCiphertext)

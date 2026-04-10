@@ -26,36 +26,10 @@ func verifyHTTPInteraction(t *testing.T, client *Client) {
 	httpClient := &http.Client{Timeout: 10 * time.Second}
 	resp, err := httpClient.Get("https://" + domain) // https to verify tls cert
 	if err == nil {
-		_ = resp.Body.Close()
+		require.NoError(t, resp.Body.Close())
 	}
 
-	var found bool
-	var mu sync.Mutex
-	done := make(chan struct{})
-	nonce := strings.Split(domain, ".")[0]
-	err = client.StartPolling(10*time.Millisecond, func(i *Interaction) {
-		mu.Lock()
-		defer mu.Unlock()
-
-		if strings.Contains(i.FullId, nonce) && (i.Protocol == "http" || i.Protocol == "https") {
-			found = true
-			select {
-			case <-done:
-			default:
-				close(done)
-			}
-		}
-	})
-	require.NoError(t, err)
-	select {
-	case <-done:
-	case <-time.After(60 * time.Second):
-	}
-	assert.NoError(t, client.StopPolling())
-
-	mu.Lock()
-	defer mu.Unlock()
-	assert.True(t, found, "expected HTTP interaction on %s", client.ServerHost())
+	assertHTTPInteraction(t, client, domain)
 }
 
 func TestIntegration_SessionPersistence(t *testing.T) {
@@ -155,4 +129,89 @@ func TestIntegration_FullLifecyclePerServer(t *testing.T) {
 			verifyHTTPInteraction(t, client)
 		})
 	}
+}
+
+// assertHTTPInteraction polls the client until an interaction matching the
+// given domain's full ID is found.
+func assertHTTPInteraction(t *testing.T, client *Client, domain string) {
+	t.Helper()
+
+	fullId := strings.SplitN(domain, ".", 2)[0]
+	var found bool
+	var mu sync.Mutex
+	done := make(chan struct{})
+
+	err := client.StartPolling(10*time.Millisecond, func(i *Interaction) {
+		mu.Lock()
+		defer mu.Unlock()
+		if !found && i.FullId == fullId && (i.Protocol == "http" || i.Protocol == "https") {
+			found = true
+			close(done)
+		}
+	})
+	require.NoError(t, err)
+
+	select {
+	case <-done:
+	case <-time.After(60 * time.Second):
+	}
+	assert.NoError(t, client.StopPolling())
+
+	mu.Lock()
+	defer mu.Unlock()
+	assert.True(t, found, "expected HTTP interaction for %s", domain)
+}
+
+func TestIntegration_RedirectToTarget(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+	t.Parallel()
+
+	httpClient := &http.Client{Timeout: 10 * time.Second}
+
+	// Target client
+	targetClient, err := New(t.Context(), Options{DisableKeepAlive: true})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = targetClient.Close() })
+
+	targetDomain := targetClient.Domain()
+
+	// Redirect client with session-stored 302 -> target
+	redirectClient, err := New(t.Context(), Options{
+		DisableKeepAlive: true,
+		Response: &ResponseConfig{
+			StatusCode: 302,
+			Headers:    []string{"Location: https://" + targetDomain},
+		},
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = redirectClient.Close() })
+
+	// Hit redirect domain -> follows redirect to target
+	redirectDomain := redirectClient.Domain()
+	resp, err := httpClient.Get("https://" + redirectDomain)
+	require.NoError(t, err)
+	require.NoError(t, resp.Body.Close())
+
+	// After following redirect, final URL should be on the target domain
+	assert.Contains(t, resp.Request.URL.Host, targetClient.CorrelationID())
+
+	// Verify interactions on both clients
+	assertHTTPInteraction(t, redirectClient, redirectDomain)
+	assertHTTPInteraction(t, targetClient, targetDomain)
+
+	// Param-encoded redirect to a different target subdomain (takes priority over session config)
+	paramTargetDomain := targetClient.Domain()
+	encodedURL := redirectClient.EncodedResponse(302, []string{"Location:https://" + paramTargetDomain}, "")
+	resp2, err := httpClient.Get(encodedURL)
+	require.NoError(t, err)
+	require.NoError(t, resp2.Body.Close())
+
+	// Followed redirect should land on the param target, not the session-stored target
+	assert.Contains(t, resp2.Request.URL.Host, targetClient.CorrelationID())
+	assert.NotEqual(t, targetDomain, paramTargetDomain)
+
+	// Verify param target interaction
+	assertHTTPInteraction(t, targetClient, paramTargetDomain)
 }
