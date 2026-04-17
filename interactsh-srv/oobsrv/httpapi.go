@@ -216,9 +216,12 @@ func (s *Server) serveStaticFile(w http.ResponseWriter, r *http.Request) {
 }
 
 // redirectLocationScheme prepends the inbound request's scheme to a schemeless
-// Location value on 302/307 redirects.
+// Location value on 302/307 redirects. Protocol-relative values (//host/path)
+// pass through verbatim so clients resolve the scheme themselves.
 func redirectLocationScheme(value string, r *http.Request) string {
 	if strings.HasPrefix(value, schemeHTTP) || strings.HasPrefix(value, schemeHTTPS) {
+		return value
+	} else if strings.HasPrefix(value, "//") {
 		return value
 	}
 	scheme := schemeHTTP

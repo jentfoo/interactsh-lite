@@ -993,6 +993,26 @@ func TestServeDefault(t *testing.T) {
 		assert.Equal(t, "https://target.com", rec.Header().Get("Location"))
 	})
 
+	t.Run("scheme_protocol_relative", func(t *testing.T) {
+		srv := testServerWithStorage(t, func(c *Config) {
+			c.DynamicResp = true
+		})
+		pubKey := &sharedRSAKey.PublicKey
+		_, err := srv.storage.Register(t.Context(), testCorrelationID, pubKey, "secret", &oobclient.ResponseConfig{
+			StatusCode: 302,
+			Headers:    []string{"Location: //target.com/path"},
+		})
+		require.NoError(t, err)
+
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req.Host = testCorrelationID + testNonce + ".test.com"
+		srv.serveDefault(rec, req)
+
+		assert.Equal(t, 302, rec.Code)
+		assert.Equal(t, "//target.com/path", rec.Header().Get("Location"))
+	})
+
 	t.Run("no_stored_response_fallthrough", func(t *testing.T) {
 		srv := testServerWithStorage(t)
 		pubKey := &sharedRSAKey.PublicKey
@@ -1104,7 +1124,7 @@ func TestServeDefault(t *testing.T) {
 		assert.Contains(t, cookies, "b=2")
 	})
 
-	t.Run("param_redirect_scheme_http", func(t *testing.T) {
+	t.Run("param_redirect_scheme", func(t *testing.T) {
 		srv := testServerWithStorage(t, func(c *Config) {
 			c.DynamicResp = true
 			c.Auth = true
@@ -1114,52 +1134,34 @@ func TestServeDefault(t *testing.T) {
 		_, err := srv.storage.Register(t.Context(), testCorrelationID, pubKey, "secret", nil)
 		require.NoError(t, err)
 
-		rec := httptest.NewRecorder()
-		req := httptest.NewRequest(http.MethodGet, "/?status=302&header=Location:target.com/path", nil)
-		req.Host = testCorrelationID + testNonce + ".test.com"
-		srv.serveDefault(rec, req)
+		cases := []struct {
+			name     string
+			location string
+			status   string
+			tls      bool
+			expected string
+			expCode  int
+		}{
+			{"bare_host_http", "target.com/path", "302", false, "http://target.com/path", 302},
+			{"bare_host_https", "target.com", "302", true, "https://target.com", 302},
+			{"explicit_scheme", "https://explicit.com", "307", false, "https://explicit.com", 307},
+			{"protocol_relative", "//target.com/path", "302", false, "//target.com/path", 302},
+		}
 
-		assert.Equal(t, 302, rec.Code)
-		assert.Equal(t, "http://target.com/path", rec.Header().Get("Location"))
-	})
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				rec := httptest.NewRecorder()
+				req := httptest.NewRequest(http.MethodGet, "/?status="+tc.status+"&header=Location:"+tc.location, nil)
+				req.Host = testCorrelationID + testNonce + ".test.com"
+				if tc.tls {
+					req.TLS = &tls.ConnectionState{}
+				}
+				srv.serveDefault(rec, req)
 
-	t.Run("param_redirect_scheme_https", func(t *testing.T) {
-		srv := testServerWithStorage(t, func(c *Config) {
-			c.DynamicResp = true
-			c.Auth = true
-			c.Token = testToken
-		})
-		pubKey := &sharedRSAKey.PublicKey
-		_, err := srv.storage.Register(t.Context(), testCorrelationID, pubKey, "secret", nil)
-		require.NoError(t, err)
-
-		rec := httptest.NewRecorder()
-		req := httptest.NewRequest(http.MethodGet, "/?status=302&header=Location:target.com", nil)
-		req.Host = testCorrelationID + testNonce + ".test.com"
-		req.TLS = &tls.ConnectionState{}
-		srv.serveDefault(rec, req)
-
-		assert.Equal(t, 302, rec.Code)
-		assert.Equal(t, "https://target.com", rec.Header().Get("Location"))
-	})
-
-	t.Run("param_redirect_explicit_scheme", func(t *testing.T) {
-		srv := testServerWithStorage(t, func(c *Config) {
-			c.DynamicResp = true
-			c.Auth = true
-			c.Token = testToken
-		})
-		pubKey := &sharedRSAKey.PublicKey
-		_, err := srv.storage.Register(t.Context(), testCorrelationID, pubKey, "secret", nil)
-		require.NoError(t, err)
-
-		rec := httptest.NewRecorder()
-		req := httptest.NewRequest(http.MethodGet, "/?status=307&header=Location:https://explicit.com", nil)
-		req.Host = testCorrelationID + testNonce + ".test.com"
-		srv.serveDefault(rec, req)
-
-		assert.Equal(t, 307, rec.Code)
-		assert.Equal(t, "https://explicit.com", rec.Header().Get("Location"))
+				assert.Equal(t, tc.expCode, rec.Code)
+				assert.Equal(t, tc.expected, rec.Header().Get("Location"))
+			})
+		}
 	})
 
 	t.Run("param_non_redirect_no_scheme", func(t *testing.T) {
