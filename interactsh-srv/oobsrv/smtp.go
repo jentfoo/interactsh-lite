@@ -262,25 +262,31 @@ func (s *Server) onSMTPData(from string, recipients []string, body []byte, remot
 	bodyStr := string(body)
 	now := time.Now().UTC()
 
+	var matched bool
 	for _, rcpt := range recipients {
-		s.captureSMTPInteraction(from, rcpt, bodyStr, remoteIP, now)
+		if s.captureSMTPInteraction(from, rcpt, bodyStr, remoteIP, now) {
+			matched = true
+		}
+	}
+	if matched {
+		s.smtpMatched.Add(1)
 	}
 }
 
-func (s *Server) captureSMTPInteraction(from, rcpt, body, remoteIP string, now time.Time) {
+func (s *Server) captureSMTPInteraction(from, rcpt, body, remoteIP string, now time.Time) bool {
 	_, recipientDomain, ok := strings.Cut(rcpt, "@")
 	if !ok {
-		return
+		return false
 	}
 	recipientDomain = strings.ToLower(recipientDomain)
 
 	domain, domainOk := s.matchedDomain(recipientDomain)
 	if !domainOk {
-		return
+		return false
 	}
 
-	s.captureInteraction(domain, recipientDomain, "", InteractionType{
-		Protocol:      "smtp",
+	return s.captureInteraction(domain, recipientDomain, "", InteractionType{
+		Protocol:      protocolSMTP,
 		UniqueID:      recipientDomain,
 		FullId:        recipientDomain,
 		RawRequest:    body,
@@ -289,7 +295,7 @@ func (s *Server) captureSMTPInteraction(from, rcpt, body, remoteIP string, now t
 		RemoteAddress: remoteIP,
 		Timestamp:     now,
 	}, InteractionType{
-		Protocol:      "smtp",
+		Protocol:      protocolSMTP,
 		RawRequest:    body,
 		SMTPFrom:      from,
 		SMTPTo:        rcpt,

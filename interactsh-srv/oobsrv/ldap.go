@@ -295,7 +295,7 @@ func (s *Server) captureLDAPSearchInteraction(baseDN, rawRequest, remoteAddr str
 	matches := MatchLDAPCorrelationID(baseDN, s.cfg.CorrelationIdLength, s.cfg.Domains, s.storage.HasCorrelationID)
 
 	s.storeMatchedInteractions(matches, InteractionType{
-		Protocol:      "ldap",
+		Protocol:      protocolLDAP,
 		RawRequest:    rawRequest,
 		RemoteAddress: remoteAddr,
 		Timestamp:     time.Now().UTC(),
@@ -308,7 +308,7 @@ func (s *Server) captureLDAPExtra(rawRequest, remoteAddr string) {
 		return
 	}
 	interaction := InteractionType{
-		Protocol:      "ldap",
+		Protocol:      protocolLDAP,
 		RawRequest:    rawRequest,
 		RemoteAddress: remoteAddr,
 		Timestamp:     time.Now().UTC(),

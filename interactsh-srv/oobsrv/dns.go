@@ -550,8 +550,8 @@ func (s *Server) captureDNSInteraction(r *dns.Msg, rawResponse string, qtype uin
 	qnameLower := normalizeFQDN(r.Question[0].Name)
 	now := time.Now().UTC()
 
-	s.captureInteraction(domain, subdomain, rawRequest, InteractionType{
-		Protocol:      "dns",
+	if s.captureInteraction(domain, subdomain, rawRequest, InteractionType{
+		Protocol:      protocolDNS,
 		UniqueID:      qnameLower,
 		FullId:        qnameLower,
 		QType:         qtypeStr,
@@ -560,13 +560,15 @@ func (s *Server) captureDNSInteraction(r *dns.Msg, rawResponse string, qtype uin
 		RemoteAddress: remoteIP,
 		Timestamp:     now,
 	}, InteractionType{
-		Protocol:      "dns",
+		Protocol:      protocolDNS,
 		QType:         qtypeStr,
 		RawRequest:    rawRequest,
 		RawResponse:   rawResponse,
 		RemoteAddress: remoteIP,
 		Timestamp:     now,
-	})
+	}) {
+		s.dnsMatched.Add(1)
+	}
 }
 
 func (s *Server) startDNS() error {

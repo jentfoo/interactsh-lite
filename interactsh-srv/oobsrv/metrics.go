@@ -12,10 +12,13 @@ import (
 // metricsResponse is the GET /metrics JSON response.
 type metricsResponse struct {
 	DNS           uint64         `json:"dns"`
+	DNSMatched    uint64         `json:"dns-matched"`
 	FTP           uint64         `json:"ftp"`
 	HTTP          uint64         `json:"http"`
+	HTTPMatched   uint64         `json:"http-matched"`
 	LDAP          uint64         `json:"ldap"`
 	SMTP          uint64         `json:"smtp"`
+	SMTPMatched   uint64         `json:"smtp-matched"`
 	Sessions      uint64         `json:"sessions"`
 	SessionsTotal uint64         `json:"sessions_total"`
 	Cache         metricsCache   `json:"cache"`
@@ -103,10 +106,13 @@ func (s *Server) handleMetrics(w http.ResponseWriter, _ *http.Request) {
 
 	resp := metricsResponse{
 		DNS:           s.dnsCount.Load(),
+		DNSMatched:    s.dnsMatched.Load(),
 		FTP:           s.ftpCount.Load(),
 		HTTP:          s.httpCount.Load(),
+		HTTPMatched:   s.httpMatched.Load(),
 		LDAP:          s.ldapCount.Load(),
 		SMTP:          s.smtpCount.Load(),
+		SMTPMatched:   s.smtpMatched.Load(),
 		Sessions:      s.storage.SessionCount(),
 		SessionsTotal: s.storage.SessionsTotal(),
 		Cache: metricsCache{

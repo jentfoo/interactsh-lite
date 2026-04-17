@@ -203,7 +203,7 @@ func (s *Server) captureFTPInteraction(rawRequest, remoteAddr string) {
 		return
 	}
 	interaction := InteractionType{
-		Protocol:      "ftp",
+		Protocol:      protocolFTP,
 		RawRequest:    rawRequest,
 		RemoteAddress: remoteAddr,
 		Timestamp:     time.Now().UTC(),

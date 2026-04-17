@@ -115,12 +115,20 @@ func TestHandleMetrics(t *testing.T) {
 		srv.ldapCount.Store(40)
 		srv.ftpCount.Store(50)
 
+		srv.dnsMatched.Store(5)
+		srv.httpMatched.Store(12)
+		srv.smtpMatched.Store(8)
+
 		resp := getMetrics(t, srv)
 		assert.Equal(t, uint64(10), resp.DNS)
 		assert.Equal(t, uint64(20), resp.HTTP)
 		assert.Equal(t, uint64(30), resp.SMTP)
 		assert.Equal(t, uint64(40), resp.LDAP)
 		assert.Equal(t, uint64(50), resp.FTP)
+
+		assert.Equal(t, uint64(5), resp.DNSMatched)
+		assert.Equal(t, uint64(12), resp.HTTPMatched)
+		assert.Equal(t, uint64(8), resp.SMTPMatched)
 	})
 
 	t.Run("metrics_disabled", func(t *testing.T) {

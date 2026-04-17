@@ -23,6 +23,15 @@ import (
 // InteractionType is the canonical wire-format type from the client module.
 type InteractionType = oobclient.Interaction
 
+const (
+	protocolDNS   = "dns"
+	protocolFTP   = "ftp"
+	protocolHTTP  = "http"
+	protocolHTTPS = "https"
+	protocolLDAP  = "ldap"
+	protocolSMTP  = "smtp"
+)
+
 // Service is the lifecycle interface for protocol listeners and background services.
 type Service interface {
 	// Name returns the service identifier for logging.
@@ -42,12 +51,19 @@ type Server struct {
 	services []Service
 	storage  Storage
 
-	// per-protocol interaction counters
+	// per-protocol interaction counters (all requests)
 	dnsCount  atomic.Uint64
 	httpCount atomic.Uint64
 	smtpCount atomic.Uint64
 	ldapCount atomic.Uint64
 	ftpCount  atomic.Uint64
+
+	// per-protocol matched interaction counters (correlation ID matched).
+	// FTP and LDAP are excluded: FTP uses a shared extra bucket with no correlation matching,
+	// and LDAP matches per-search operation rather than per-connection so the count would not correspond to ldapCount.
+	dnsMatched  atomic.Uint64
+	httpMatched atomic.Uint64
+	smtpMatched atomic.Uint64
 
 	// Shared interaction buckets for poll response
 	tldBuckets  map[string]*SharedBucket // keyed by domain, for --wildcard
@@ -278,12 +294,9 @@ func (s *Server) storeMatchedInteractions(matches []Match, interaction Interacti
 	for _, match := range matches {
 		interaction.UniqueID = match.UniqueID
 		interaction.FullId = match.FullID
-		data, err := json.Marshal(interaction)
-		if err != nil {
+		if data, err := json.Marshal(interaction); err != nil {
 			s.logger.Error("failed to marshal interaction", "error", err)
-			continue
-		}
-		if err := s.storage.AppendInteraction(match.UniqueID, data); err != nil {
+		} else if err = s.storage.AppendInteraction(match.UniqueID, data); err != nil {
 			s.logger.Error("failed to store interaction", "error", err, "correlation-id", match.UniqueID)
 		}
 	}
@@ -307,7 +320,8 @@ func (s *Server) captureWildcard(domain string, interaction InteractionType) {
 
 // captureInteraction runs wildcard + correlation matching + store for DNS, HTTP,
 // and SMTP. Pass scanInput="" to disable ScanEverywhere mode.
-func (s *Server) captureInteraction(domain, matchInput, scanInput string, wildcardInteraction, storeInteraction InteractionType) {
+// Returns true if at least one correlation ID matched.
+func (s *Server) captureInteraction(domain, matchInput, scanInput string, wildcardInteraction, storeInteraction InteractionType) bool {
 	s.captureWildcard(domain, wildcardInteraction)
 
 	var matches []Match
@@ -317,6 +331,7 @@ func (s *Server) captureInteraction(domain, matchInput, scanInput string, wildca
 		matches = MatchCorrelationID(matchInput, s.cfg.CorrelationIdLength, s.cfg.Domains, s.storage.HasCorrelationID)
 	}
 	s.storeMatchedInteractions(matches, storeInteraction)
+	return len(matches) > 0
 }
 
 func (s *Server) closeStorage() {

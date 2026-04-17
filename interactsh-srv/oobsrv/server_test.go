@@ -247,7 +247,7 @@ func TestCaptureInteraction(t *testing.T) {
 		// CID embedded in HTTP-style text (not DNS labels)
 		scanInput := "GET / HTTP/1.1\r\nHost: " + testCorrelationID + "nop.test.com\r\n"
 		interaction := InteractionType{Protocol: "http"}
-		srv.captureInteraction("test.com", "", scanInput, interaction, interaction)
+		assert.True(t, srv.captureInteraction("test.com", "", scanInput, interaction, interaction))
 
 		interactions, err := testGetAndClearInteractions(t, srv.storage, testCorrelationID, "secret")
 		require.NoError(t, err)
@@ -293,7 +293,7 @@ func TestCaptureInteraction(t *testing.T) {
 		require.NoError(t, err)
 
 		interaction := InteractionType{Protocol: "dns"}
-		srv.captureInteraction("test.com", "unregistered.test.com", "", interaction, interaction)
+		assert.False(t, srv.captureInteraction("test.com", "unregistered.test.com", "", interaction, interaction))
 
 		// Nothing stored since no CID is registered
 		assert.Equal(t, uint64(0), srv.storage.SessionCount())
@@ -313,7 +313,7 @@ func TestCaptureInteraction(t *testing.T) {
 
 		matchInput := testCorrelationID + "nop." + testCorrelationID2 + "abc.test.com"
 		interaction := InteractionType{Protocol: "dns"}
-		srv.captureInteraction("test.com", matchInput, "", interaction, interaction)
+		assert.True(t, srv.captureInteraction("test.com", matchInput, "", interaction, interaction))
 
 		i1, err := testGetAndClearInteractions(t, srv.storage, testCorrelationID, "secret")
 		require.NoError(t, err)

@@ -72,14 +72,14 @@ func (s *Server) onHTTPInteraction(r *http.Request, rawReq, rawResp, remoteAddr,
 		return
 	}
 
-	protocol := "http"
+	protocol := protocolHTTP
 	if r.TLS != nil {
-		protocol = "https"
+		protocol = protocolHTTPS
 	}
 
 	now := time.Now().UTC()
 
-	s.captureInteraction(domain, hostname, rawReq,
+	if s.captureInteraction(domain, hostname, rawReq,
 		InteractionType{
 			Protocol:      protocol,
 			UniqueID:      hostname,
@@ -94,7 +94,9 @@ func (s *Server) onHTTPInteraction(r *http.Request, rawReq, rawResp, remoteAddr,
 			RawResponse:   rawResp,
 			RemoteAddress: remoteAddr,
 			Timestamp:     now,
-		})
+		}) {
+		s.httpMatched.Add(1)
+	}
 }
 
 // serveDefault handles non-API requests with priority-based response routing.
