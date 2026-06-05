@@ -9,8 +9,20 @@ import (
 	"net"
 	"net/http"
 	"net/http/httputil"
+	"strings"
 	"sync"
 )
+
+const standardCORSAllowMethods = "GET, HEAD, POST, PUT, PATCH, DELETE, OPTIONS"
+
+// "*" covers non-credentialed reads; named headers are required because
+// Access-Control-Expose-Headers treats "*" literally when credentials are sent.
+const standardCORSExposeHeaders = "*, Server, X-Interactsh-Version, Location, Content-Disposition, Content-Length, Date"
+
+var standardCORSMethodSet = map[string]struct{}{
+	"GET": {}, "HEAD": {}, "POST": {}, "PUT": {},
+	"PATCH": {}, "DELETE": {}, "OPTIONS": {},
+}
 
 // InteractionCallback receives captured HTTP data from logger middleware.
 // hostname/domain are pre-computed by the handler and cached on the recorder.
@@ -82,7 +94,15 @@ func CORSMiddleware(acaoURL string, next http.Handler) http.Handler {
 // InteractionCORSMiddleware sets maximally permissive CORS headers for
 // interaction capture responses. It reflects the request Origin (or "*" when
 // absent) and enables credentials so preflighted cross-origin requests from
-// XSS/SSRF payloads fire and get captured.
+// XSS/SSRF payloads fire and get captured. Preflight responses enumerate all
+// browser-allowed methods and reflect the requested headers, since "*" is
+// treated literally when Access-Control-Allow-Credentials is true. Non-standard
+// verbs (e.g. WebDAV PROPFIND) are reflected from Access-Control-Request-Method
+// and Private Network Access preflights are echoed back. Cross-Origin-Resource-
+// Policy: cross-origin and Access-Control-Expose-Headers (with named entries for
+// the credentialed case) are set so payloads can read responses. Referrer-
+// Policy: unsafe-url encourages full Referer headers on follow-up requests, and
+// OPTIONS responses include an Allow header for non-CORS probes.
 func InteractionCORSMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		origin := r.Header.Get("Origin")
@@ -91,10 +111,26 @@ func InteractionCORSMiddleware(next http.Handler) http.Handler {
 		}
 		w.Header().Set("Access-Control-Allow-Origin", origin)
 		w.Header().Set("Access-Control-Allow-Credentials", "true")
-		w.Header().Set("Access-Control-Allow-Methods", "*")
-		w.Header().Set("Access-Control-Allow-Headers", "*")
-		w.Header().Set("Vary", "Origin")
+		w.Header().Set("Access-Control-Expose-Headers", standardCORSExposeHeaders)
+		w.Header().Set("Cross-Origin-Resource-Policy", "cross-origin")
+		w.Header().Set("Referrer-Policy", "unsafe-url")
+		w.Header().Set("Vary", "Origin, Access-Control-Request-Method, Access-Control-Request-Headers")
 		if r.Method == http.MethodOptions {
+			allowMethods := standardCORSAllowMethods
+			if reqMethod := strings.ToUpper(r.Header.Get("Access-Control-Request-Method")); reqMethod != "" {
+				if _, ok := standardCORSMethodSet[reqMethod]; !ok {
+					allowMethods += ", " + reqMethod
+				}
+			}
+			w.Header().Set("Access-Control-Allow-Methods", allowMethods)
+			// Allow mirrors the CORS method list for non-CORS OPTIONS probes (RFC 7231 §4.3.7).
+			w.Header().Set("Allow", allowMethods)
+			if h := r.Header.Get("Access-Control-Request-Headers"); h != "" {
+				w.Header().Set("Access-Control-Allow-Headers", h)
+			}
+			if r.Header.Get("Access-Control-Request-Private-Network") == "true" {
+				w.Header().Set("Access-Control-Allow-Private-Network", "true")
+			}
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}

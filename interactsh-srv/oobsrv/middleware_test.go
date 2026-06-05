@@ -74,9 +74,13 @@ func TestInteractionCORSMiddleware(t *testing.T) {
 		assert.Equal(t, http.StatusOK, rec.Code)
 		assert.Equal(t, "https://evil.example.com", rec.Header().Get("Access-Control-Allow-Origin"))
 		assert.Equal(t, "true", rec.Header().Get("Access-Control-Allow-Credentials"))
-		assert.Equal(t, "*", rec.Header().Get("Access-Control-Allow-Methods"))
-		assert.Equal(t, "*", rec.Header().Get("Access-Control-Allow-Headers"))
-		assert.Equal(t, "Origin", rec.Header().Get("Vary"))
+		assert.Equal(t, "cross-origin", rec.Header().Get("Cross-Origin-Resource-Policy"))
+		assert.Equal(t, "unsafe-url", rec.Header().Get("Referrer-Policy"))
+		assert.Equal(t, standardCORSExposeHeaders, rec.Header().Get("Access-Control-Expose-Headers"))
+		assert.Empty(t, rec.Header().Get("Access-Control-Allow-Methods"))
+		assert.Empty(t, rec.Header().Get("Allow"))
+		assert.Empty(t, rec.Header().Get("Access-Control-Allow-Headers"))
+		assert.Equal(t, "Origin, Access-Control-Request-Method, Access-Control-Request-Headers", rec.Header().Get("Vary"))
 	})
 
 	t.Run("wildcard_without_origin", func(t *testing.T) {
@@ -89,7 +93,29 @@ func TestInteractionCORSMiddleware(t *testing.T) {
 		assert.Equal(t, "true", rec.Header().Get("Access-Control-Allow-Credentials"))
 	})
 
-	t.Run("options_returns_204", func(t *testing.T) {
+	t.Run("options_reflects_preflight", func(t *testing.T) {
+		h := InteractionCORSMiddleware(inner)
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodOptions, "/", nil)
+		req.Header.Set("Origin", "https://attacker.com")
+		req.Header.Set("Access-Control-Request-Method", "POST")
+		req.Header.Set("Access-Control-Request-Headers", "authorization, content-type")
+		h.ServeHTTP(rec, req)
+
+		assert.Equal(t, http.StatusNoContent, rec.Code)
+		assert.Equal(t, "https://attacker.com", rec.Header().Get("Access-Control-Allow-Origin"))
+		assert.Equal(t, "true", rec.Header().Get("Access-Control-Allow-Credentials"))
+		assert.Equal(t, "cross-origin", rec.Header().Get("Cross-Origin-Resource-Policy"))
+		assert.Equal(t, "unsafe-url", rec.Header().Get("Referrer-Policy"))
+		assert.Equal(t, standardCORSExposeHeaders, rec.Header().Get("Access-Control-Expose-Headers"))
+		assert.Equal(t, "GET, HEAD, POST, PUT, PATCH, DELETE, OPTIONS", rec.Header().Get("Access-Control-Allow-Methods"))
+		assert.Equal(t, "GET, HEAD, POST, PUT, PATCH, DELETE, OPTIONS", rec.Header().Get("Allow"))
+		assert.Equal(t, "authorization, content-type", rec.Header().Get("Access-Control-Allow-Headers"))
+		assert.Equal(t, "Origin, Access-Control-Request-Method, Access-Control-Request-Headers", rec.Header().Get("Vary"))
+		assert.Empty(t, rec.Body.String())
+	})
+
+	t.Run("options_without_request_headers", func(t *testing.T) {
 		h := InteractionCORSMiddleware(inner)
 		rec := httptest.NewRecorder()
 		req := httptest.NewRequest(http.MethodOptions, "/", nil)
@@ -97,11 +123,86 @@ func TestInteractionCORSMiddleware(t *testing.T) {
 		h.ServeHTTP(rec, req)
 
 		assert.Equal(t, http.StatusNoContent, rec.Code)
-		assert.Equal(t, "https://attacker.com", rec.Header().Get("Access-Control-Allow-Origin"))
-		assert.Equal(t, "true", rec.Header().Get("Access-Control-Allow-Credentials"))
-		assert.Equal(t, "*", rec.Header().Get("Access-Control-Allow-Methods"))
-		assert.Equal(t, "*", rec.Header().Get("Access-Control-Allow-Headers"))
-		assert.Empty(t, rec.Body.String())
+		assert.Equal(t, "GET, HEAD, POST, PUT, PATCH, DELETE, OPTIONS", rec.Header().Get("Access-Control-Allow-Methods"))
+		assert.Empty(t, rec.Header().Get("Access-Control-Allow-Headers"))
+	})
+
+	t.Run("options_reflects_nonstandard_method", func(t *testing.T) {
+		h := InteractionCORSMiddleware(inner)
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodOptions, "/", nil)
+		req.Header.Set("Access-Control-Request-Method", "PROPFIND")
+		h.ServeHTTP(rec, req)
+
+		assert.Equal(t, "GET, HEAD, POST, PUT, PATCH, DELETE, OPTIONS, PROPFIND", rec.Header().Get("Access-Control-Allow-Methods"))
+		assert.Equal(t, "GET, HEAD, POST, PUT, PATCH, DELETE, OPTIONS, PROPFIND", rec.Header().Get("Allow"))
+	})
+
+	t.Run("options_reflects_lowercase_method", func(t *testing.T) {
+		h := InteractionCORSMiddleware(inner)
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodOptions, "/", nil)
+		req.Header.Set("Access-Control-Request-Method", "mkcol")
+		h.ServeHTTP(rec, req)
+
+		assert.Equal(t, "GET, HEAD, POST, PUT, PATCH, DELETE, OPTIONS, MKCOL", rec.Header().Get("Access-Control-Allow-Methods"))
+	})
+
+	t.Run("options_standard_method_unchanged", func(t *testing.T) {
+		h := InteractionCORSMiddleware(inner)
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodOptions, "/", nil)
+		req.Header.Set("Access-Control-Request-Method", "POST")
+		h.ServeHTTP(rec, req)
+
+		assert.Equal(t, "GET, HEAD, POST, PUT, PATCH, DELETE, OPTIONS", rec.Header().Get("Access-Control-Allow-Methods"))
+	})
+
+	t.Run("options_private_network_reflected", func(t *testing.T) {
+		h := InteractionCORSMiddleware(inner)
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodOptions, "/", nil)
+		req.Header.Set("Access-Control-Request-Private-Network", "true")
+		h.ServeHTTP(rec, req)
+
+		assert.Equal(t, "true", rec.Header().Get("Access-Control-Allow-Private-Network"))
+	})
+
+	t.Run("options_private_network_absent", func(t *testing.T) {
+		h := InteractionCORSMiddleware(inner)
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodOptions, "/", nil)
+		h.ServeHTTP(rec, req)
+
+		assert.Empty(t, rec.Header().Get("Access-Control-Allow-Private-Network"))
+	})
+
+	t.Run("options_private_network_non_true", func(t *testing.T) {
+		h := InteractionCORSMiddleware(inner)
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodOptions, "/", nil)
+		req.Header.Set("Access-Control-Request-Private-Network", "false")
+		h.ServeHTTP(rec, req)
+
+		assert.Empty(t, rec.Header().Get("Access-Control-Allow-Private-Network"))
+	})
+
+	t.Run("corp_set_on_get", func(t *testing.T) {
+		h := InteractionCORSMiddleware(inner)
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		h.ServeHTTP(rec, req)
+
+		assert.Equal(t, "cross-origin", rec.Header().Get("Cross-Origin-Resource-Policy"))
+	})
+
+	t.Run("corp_set_on_options", func(t *testing.T) {
+		h := InteractionCORSMiddleware(inner)
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodOptions, "/", nil)
+		h.ServeHTTP(rec, req)
+
+		assert.Equal(t, "cross-origin", rec.Header().Get("Cross-Origin-Resource-Policy"))
 	})
 }
 
